@@ -52,4 +52,9 @@ router.get('/health', (req, res) => {
     res.status(200).json({ status: 'UP', message: 'RentEase API is running!' });
 });
 
+// Route / แสดงข้อความ RentEase
+router.get('/', (req, res) => {
+    res.send('RentEase');
+});
+
 export default router;
