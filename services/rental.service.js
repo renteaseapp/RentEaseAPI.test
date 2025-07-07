@@ -446,6 +446,7 @@ const RentalService = {
         return updatedRental;
     },
 
+<<<<<<< HEAD
     // --- เพิ่มฟังก์ชัน payout อัตโนมัติ ---
     async createPayoutTransactionForRental(rental) {
         // ตรวจสอบว่ามี payout transaction นี้แล้วหรือยัง (ป้องกันซ้ำ)
@@ -473,6 +474,8 @@ const RentalService = {
         }]);
     },
 
+=======
+>>>>>>> 55b0194c2d6ec825affe8c8a53a320b6496ad045
     async processReturn(rentalIdOrUid, ownerId, returnData, imageFiles = []) {
         const rental = await RentalModel.findByIdentifier(rentalIdOrUid);
         if (!rental) {
@@ -485,18 +488,32 @@ const RentalService = {
         if (!validStatusesForReturn.includes(rental.rental_status)) {
             throw new ApiError(httpStatusCodes.BAD_REQUEST, `Cannot process return. Rental status is '${rental.rental_status}'.`);
         }
+<<<<<<< HEAD
         const { actual_return_time, return_condition_status, notes_from_owner_on_return, initiate_claim } = returnData;
+=======
+
+        const { actual_return_time, return_condition_status, notes_from_owner_on_return, initiate_claim } = returnData;
+        
+>>>>>>> 55b0194c2d6ec825affe8c8a53a320b6496ad045
         const updatePayload = {
             actual_return_time,
             return_condition_status,
             notes_from_owner_on_return,
             updated_at: new Date().toISOString()
         };
+<<<<<<< HEAD
+=======
+
+>>>>>>> 55b0194c2d6ec825affe8c8a53a320b6496ad045
         let newRentalStatus = 'completed';
         if (initiate_claim && (return_condition_status === 'damaged' || return_condition_status === 'lost')) {
             newRentalStatus = 'dispute';
         }
         updatePayload.rental_status = newRentalStatus;
+<<<<<<< HEAD
+=======
+
+>>>>>>> 55b0194c2d6ec825affe8c8a53a320b6496ad045
         // Handle return condition images
         if (imageFiles && imageFiles.length > 0) {
             const imageUrls = [];
@@ -508,6 +525,10 @@ const RentalService = {
             }
             updatePayload.return_condition_image_urls = imageUrls;
         }
+<<<<<<< HEAD
+=======
+
+>>>>>>> 55b0194c2d6ec825affe8c8a53a320b6496ad045
         const updatedRental = await RentalModel.update(rental.id, updatePayload);
         await RentalStatusHistoryModel.create(
             rental.id, 
@@ -516,7 +537,13 @@ const RentalService = {
             `Return processed. Condition: ${return_condition_status}. Notes: ${notes_from_owner_on_return || ''}`, 
             rental.rental_status
         );
+<<<<<<< HEAD
         if (newRentalStatus === 'completed') {
+=======
+
+        if (newRentalStatus === 'completed') {
+            // Return product quantity if it was managed per rental instance
+>>>>>>> 55b0194c2d6ec825affe8c8a53a320b6496ad045
             try {
                 if (rental.product_id) {
                     await ProductModel.updateQuantityAvailable(rental.product_id, 1);
@@ -524,8 +551,12 @@ const RentalService = {
             } catch (qtyError) {
                 console.error("Error restoring product quantity after completion:", qtyError);
             }
+<<<<<<< HEAD
             // --- เรียก payout อัตโนมัติ ---
             await this.createPayoutTransactionForRental({ ...rental, ...updatePayload });
+=======
+            // TODO: Trigger payout process for owner if applicable
+>>>>>>> 55b0194c2d6ec825affe8c8a53a320b6496ad045
             // Send notification to renter about completion
             await NotificationService.createNotification({
                 user_id: rental.renter_id,

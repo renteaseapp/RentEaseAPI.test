@@ -13,7 +13,10 @@ import claimRouter from './claim.routes.js';
 import chatRouter from './chat.routes.js';
 import notificationRoutes from './notification.routes.js';
 import adminRouter from './admin.routes.js';
+<<<<<<< HEAD
 import complaintRoutes from './complaint.routes.js';
+=======
+>>>>>>> 55b0194c2d6ec825affe8c8a53a320b6496ad045
 // Import other routers as they are created in subsequent days
 
 const router = express.Router();
@@ -38,7 +41,10 @@ router.use('/webhooks', webhookRouter);
 router.use('/chat', chatRouter);
 router.use('/notifications', notificationRoutes);
 router.use('/admin', adminRouter);
+<<<<<<< HEAD
 router.use('/complaints', complaintRoutes);
+=======
+>>>>>>> 55b0194c2d6ec825affe8c8a53a320b6496ad045
 // router.use('/products', productRouter); etc.
 
 // A simple health check endpoint
