@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import RentalService from '../services/rental.service.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiResponse } from '../utils/apiResponse.js';
@@ -33,40 +32,4 @@ const RenterController = {
     })
 };
 
-=======
-import RentalService from '../services/rental.service.js';
-import { asyncHandler } from '../utils/asyncHandler.js';
-import { ApiResponse } from '../utils/apiResponse.js';
-import httpStatusCodes from '../constants/httpStatusCodes.js';
-import renterService from '../services/renter.service.js';
-
-const RenterController = {
-    getDashboard: asyncHandler(async (req, res) => {
-        const renterId = req.user.id;
-        // For Day 4, this might be simple. Can be expanded later.
-        const dashboardData = await RentalService.getRenterDashboardData(renterId);
-        // You might want to combine with wishlist data from UserService here if needed.
-        res.status(httpStatusCodes.OK).json(
-            new ApiResponse(httpStatusCodes.OK, { data: dashboardData })
-        );
-    }),
-
-    getMyRentals: asyncHandler(async (req, res) => {
-        const renterId = req.user.id;
-        const filters = req.validatedData || req.query; // Use validatedData if available
-        const rentals = await RentalService.getRentalsForUser(renterId, 'renter', filters);
-        res.status(httpStatusCodes.OK).json(
-            new ApiResponse(httpStatusCodes.OK, rentals)
-        );
-    }),
-
-    getRentalDeliveryStatus: asyncHandler(async (req, res) => {
-        const rentalId = req.params.id;
-        const renterId = req.user.id;
-        const result = await renterService.getRentalDeliveryStatus(rentalId, renterId);
-        res.json(result);
-    })
-};
-
->>>>>>> 55b0194c2d6ec825affe8c8a53a320b6496ad045
 export default RenterController; 
