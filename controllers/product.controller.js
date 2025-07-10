@@ -151,6 +151,15 @@ const ProductController = {
         res.status(httpStatusCodes.OK).json(
             new ApiResponse(httpStatusCodes.OK, null, "Product deleted successfully")
         );
+    }),
+
+    // สินค้ายอดนิยมจากยอดการเช่า (public)
+    getTopRentedProducts: asyncHandler(async (req, res) => {
+        const limit = parseInt(req.query.limit, 10) || 5;
+        const products = await ProductService.getTopRentedProducts(limit);
+        res.status(httpStatusCodes.OK).json(
+            new ApiResponse(httpStatusCodes.OK, { data: products }, 'Top rented products')
+        );
     })
 };
 

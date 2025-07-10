@@ -29,7 +29,7 @@ const IdVerificationController = {
         }
         const files = {
             id_document: req.files.id_document[0],
-            id_document_back: req.files.id_document_back[0],
+            id_document_back: req.files.id_document_back ? req.files.id_document_back[0] : undefined,
             id_selfie: req.files.id_selfie[0]
         };
         const result = await IdVerificationService.submitVerification(userId, verificationData, files);

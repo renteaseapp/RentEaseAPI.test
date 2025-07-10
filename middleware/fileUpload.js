@@ -125,6 +125,7 @@ export const uploadMultipleFields = (fields) => {
             // ตรวจสอบว่ามีไฟล์ที่จำเป็นครบหรือไม่ (เฉพาะสำหรับ required fields)
             if (req.files) {
                 const missingFiles = fields.filter(field => {
+                    if (field.optional) return false; // skip optional fields
                     const files = req.files[field.name];
                     return !files || files.length === 0;
                 });

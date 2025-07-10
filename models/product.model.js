@@ -18,6 +18,31 @@ const ProductModel = {
 
         const offset = (page - 1) * limit;
 
+        // ดึงจำนวนทั้งหมดก่อน
+        let countQuery = supabase
+            .from('products')
+            .select('id', { count: 'exact', head: true })
+            .eq('admin_approval_status', 'approved')
+            .eq('availability_status', 'available')
+            .is('deleted_at', null);
+        if (featured) countQuery = countQuery.eq('is_featured', true);
+        if (q) countQuery = countQuery.or(`title.ilike.%${q}%,description.ilike.%${q}%`);
+        if (category_id) countQuery = countQuery.eq('category_id', category_id);
+        if (province_ids && province_ids.length > 0) countQuery = countQuery.in('province_id', province_ids);
+        if (min_price !== undefined) countQuery = countQuery.gte('rental_price_per_day', min_price);
+        if (max_price !== undefined) countQuery = countQuery.lte('rental_price_per_day', max_price);
+        
+        const { count: total, error: countError } = await countQuery;
+        if (countError) {
+            console.error('Error counting products:', countError);
+            throw countError;
+        }
+
+        // ถ้า offset เกินจำนวนข้อมูลจริง ให้คืน array ว่าง
+        if (offset >= total) {
+            return { products: [], total };
+        }
+
         let query = supabase
             .from('products')
             .select(`
@@ -29,7 +54,6 @@ const ProductModel = {
             .eq('admin_approval_status', 'approved')
             .eq('availability_status', 'available')
             .is('deleted_at', null);
-
         if (featured) {
             query = query.eq('is_featured', true);
         }
@@ -80,7 +104,7 @@ const ProductModel = {
             category: p.category || null
         }));
 
-        return { products, total: count };
+        return { products, total };
     },
 
     async findByIdOrSlug(identifier) {
@@ -313,6 +337,61 @@ const ProductModel = {
                 // Links can be added here similar to findAll if needed
             }
         };
+    },
+
+    // ดึงสินค้ายอดนิยมจากยอดการเช่า (top N)
+    async getTopRentedProducts(limit = 5) {
+        // 1. ดึง rentals ที่ completed และ product_id ไม่เป็น null
+        const { data: rentals, error: rentalError } = await supabase
+            .from('rentals')
+            .select('product_id')
+            .eq('rental_status', 'completed')
+            .not('product_id', 'is', null);
+        if (rentalError) {
+            console.error('Error fetching rentals:', rentalError);
+            throw rentalError;
+        }
+        // 2. Group by product_id ใน JS
+        const rentalCountMap = {};
+        (rentals || []).forEach(r => {
+            if (!r.product_id) return;
+            rentalCountMap[r.product_id] = (rentalCountMap[r.product_id] || 0) + 1;
+        });
+        // 3. เรียงลำดับ top N
+        const topProductIds = Object.entries(rentalCountMap)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, limit)
+            .map(([productId]) => parseInt(productId, 10));
+        if (topProductIds.length === 0) return [];
+        // 4. ดึงข้อมูลสินค้า
+        const { data: products, error: productError } = await supabase
+            .from('products')
+            .select(`
+                id, title, slug, rental_price_per_day, average_rating, total_reviews, view_count,
+                province:provinces (id, name_th),
+                category:categories (id, name),
+                primary_image:product_images (image_url)
+            `)
+            .in('id', topProductIds)
+            .eq('admin_approval_status', 'approved')
+            .eq('availability_status', 'available')
+            .is('deleted_at', null);
+        if (productError) {
+            console.error('Error fetching products for top rented:', productError);
+            throw productError;
+        }
+        // 5. Join ข้อมูลยอดเช่าเข้าไปในสินค้า
+        const productMap = {};
+        (products || []).forEach(p => {
+            productMap[p.id] = {
+                ...p,
+                primary_image: p.primary_image && p.primary_image.length > 0 ? p.primary_image[0] : { image_url: null },
+                category: p.category || null,
+                rental_count: rentalCountMap[p.id] || 0
+            };
+        });
+        // 6. คืน array ตามลำดับยอดเช่า
+        return topProductIds.map(id => productMap[id]).filter(Boolean);
     }
 };
 

@@ -54,6 +54,14 @@ const ReviewController = {
         const { rentalId } = req.params;
         await ReviewService.deleteReview(userId, rentalId);
         res.status(httpStatusCodes.OK).json(new ApiResponse(httpStatusCodes.OK, null, 'Review deleted successfully.'));
+    }),
+
+    // อัปเดต average_rating และ total_reviews ของสินค้าทั้งหมด (สำหรับ admin/development)
+    updateAllProductRatingStats: asyncHandler(async (req, res) => {
+        const result = await ReviewService.updateAllProductRatingStats();
+        res.status(httpStatusCodes.OK).json(
+            new ApiResponse(httpStatusCodes.OK, result, 'All product rating stats updated successfully')
+        );
     })
 };
 

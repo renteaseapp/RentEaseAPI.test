@@ -28,15 +28,15 @@ export const idVerificationSchema = Joi.object({
 export const validateIdVerificationFiles = (files) => {
     const errors = [];
     
-    // Check if all required files are present
-    if (!files.id_document || !files.id_document_back || !files.id_selfie) {
-        errors.push('All required files (ID front, ID back, and selfie) must be uploaded');
+    // Check if required files are present (id_document, id_selfie)
+    if (!files.id_document || !files.id_selfie) {
+        errors.push('ID document front and selfie must be uploaded');
         return errors;
     }
 
     // Validate each file
     const validateFile = (file, fieldName) => {
-        if (!file[0]) return;
+        if (!file || !file[0]) return;
         
         const fileObj = file[0];
         
@@ -52,7 +52,10 @@ export const validateIdVerificationFiles = (files) => {
     };
 
     validateFile(files.id_document, 'ID document front');
-    validateFile(files.id_document_back, 'ID document back');
+    // id_document_back is optional, validate only if present
+    if (files.id_document_back) {
+        validateFile(files.id_document_back, 'ID document back');
+    }
     validateFile(files.id_selfie, 'Selfie');
 
     return errors;
