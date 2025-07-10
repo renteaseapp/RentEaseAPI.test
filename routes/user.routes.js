@@ -31,14 +31,14 @@ router.post(
     authenticateJWT,
     uploadMultipleFields([
         { name: 'id_document', maxCount: 1 },
-        { name: 'id_document_back', maxCount: 1 },
+        { name: 'id_document_back', maxCount: 1, optional: true },
         { name: 'id_selfie', maxCount: 1 }
     ]),
     (req, res, next) => {
-        if (!req.files || !req.files.id_document || !req.files.id_document_back || !req.files.id_selfie) {
+        if (!req.files || !req.files.id_document || !req.files.id_selfie) {
             return res.status(400).json({
                 success: false,
-                message: 'Missing required files. Please upload all required documents.'
+                message: 'Missing required files. Please upload at least ID front and selfie.'
             });
         }
         next();

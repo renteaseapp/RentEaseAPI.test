@@ -34,6 +34,46 @@ app.use((req, res, next) => {
     next();
 });
 
+// Root route
+app.get('/', (req, res) => {
+    res.status(200).json({
+        message: 'Welcome to RentEase API',
+        version: '1.0.0',
+        status: 'running',
+        endpoints: {
+            api: '/api',
+            health: '/api/health',
+            documentation: 'Coming soon...'
+        },
+        timestamp: new Date().toISOString()
+    });
+});
+
+// API route
+app.get('/api', (req, res) => {
+    res.status(200).json({
+        message: 'RentEase API',
+        version: '1.0.0',
+        status: 'running',
+        availableEndpoints: {
+            auth: '/api/auth',
+            users: '/api/users',
+            products: '/api/products',
+            categories: '/api/categories',
+            rentals: '/api/rentals',
+            owners: '/api/owners',
+            renters: '/api/renters',
+            claims: '/api/claims',
+            chat: '/api/chat',
+            notifications: '/api/notifications',
+            admin: '/api/admin',
+            complaints: '/api/complaints',
+            health: '/api/health'
+        },
+        timestamp: new Date().toISOString()
+    });
+});
+
 // Main API Router
 app.use('/api', routes);
 

@@ -31,22 +31,28 @@ const IdVerificationService = {
 
         try {
             // Upload files to Supabase Storage
-            const [idDocumentResult, idDocumentBackResult, idSelfieResult] = await Promise.all([
-                FileService.uploadFileToSupabaseStorage(
-                    id_document,
-                    storageConfig.idVerificationBucketName,
-                    `public/${userId}/id_document.${id_document.originalname.split('.').pop()}`
-                ),
-                FileService.uploadFileToSupabaseStorage(
+            const idDocumentPromise = FileService.uploadFileToSupabaseStorage(
+                id_document,
+                storageConfig.idVerificationBucketName,
+                `public/${userId}/id_document.${id_document.originalname.split('.').pop()}`
+            );
+            const idSelfiePromise = FileService.uploadFileToSupabaseStorage(
+                id_selfie,
+                storageConfig.idVerificationBucketName,
+                `public/${userId}/id_selfie.${id_selfie.originalname.split('.').pop()}`
+            );
+            let idDocumentBackPromise = Promise.resolve(null);
+            if (id_document_back) {
+                idDocumentBackPromise = FileService.uploadFileToSupabaseStorage(
                     id_document_back,
                     storageConfig.idVerificationBucketName,
                     `public/${userId}/id_document_back.${id_document_back.originalname.split('.').pop()}`
-                ),
-                FileService.uploadFileToSupabaseStorage(
-                    id_selfie,
-                    storageConfig.idVerificationBucketName,
-                    `public/${userId}/id_selfie.${id_selfie.originalname.split('.').pop()}`
-                )
+                );
+            }
+            const [idDocumentResult, idDocumentBackResult, idSelfieResult] = await Promise.all([
+                idDocumentPromise,
+                idDocumentBackPromise,
+                idSelfiePromise
             ]);
 
             // Update user with verification data and document URLs
@@ -56,10 +62,12 @@ const IdVerificationService = {
                 id_document_type,
                 id_document_number,
                 id_document_url: idDocumentResult.publicUrl,
-                id_document_back_url: idDocumentBackResult.publicUrl,
                 id_selfie_url: idSelfieResult.publicUrl,
                 updated_at: new Date().toISOString()
             };
+            if (idDocumentBackResult && idDocumentBackResult.publicUrl) {
+                updateData.id_document_back_url = idDocumentBackResult.publicUrl;
+            }
 
             // Update user in database
             const updatedUser = await UserModel.update(userId, updateData);

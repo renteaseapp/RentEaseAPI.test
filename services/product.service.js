@@ -461,6 +461,11 @@ const ProductService = {
 
         // No need to return the deleted product
         return null; // Indicate successful deletion
+    },
+
+    // ดึงสินค้ายอดนิยมจากยอดการเช่า (top N)
+    async getTopRentedProducts(limit = 5) {
+        return await ProductModel.getTopRentedProducts(limit);
     }
 };
 

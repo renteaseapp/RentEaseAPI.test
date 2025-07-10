@@ -26,6 +26,11 @@ router.get(
 );
 
 router.get(
+    '/popular',
+    ProductController.getTopRentedProducts
+);
+
+router.get(
     '/:product_slug_or_id',
     ProductController.getProductByIdOrSlug
 );
@@ -105,5 +110,12 @@ router.put('/reviews/:rentalId', authenticateJWT, ReviewController.updateReview)
 
 // DELETE /reviews/:rentalId (delete review)
 router.delete('/reviews/:rentalId', authenticateJWT, ReviewController.deleteReview);
+
+// Admin/Development: อัปเดต average_rating และ total_reviews ของสินค้าทั้งหมด
+router.post(
+    '/reviews/update-all-product-rating-stats',
+    authenticateJWT,
+    ReviewController.updateAllProductRatingStats
+);
 
 export default router; 
