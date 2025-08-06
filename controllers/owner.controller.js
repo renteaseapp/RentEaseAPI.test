@@ -47,9 +47,12 @@ const OwnerController = {
 
     updateRentalDeliveryStatus: asyncHandler(async (req, res) => {
         const rentalId = req.params.id;
+        const ownerId = req.user.id;
         const { delivery_status, tracking_number, carrier_code } = req.body;
-        const result = await OwnerService.updateRentalDeliveryStatus(rentalId, { delivery_status, tracking_number, carrier_code });
-        res.json(result);
+        const result = await OwnerService.updateRentalDeliveryStatus(rentalId, ownerId, { delivery_status, tracking_number, carrier_code });
+        res.status(httpStatusCodes.OK).json(
+            new ApiResponse(httpStatusCodes.OK, { data: result })
+        );
     }),
 
     getReport: asyncHandler(async (req, res) => {

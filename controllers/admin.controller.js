@@ -24,16 +24,16 @@ const getAllUsers = asyncHandler(async (req, res) => {
   res.json(result);
 });
 const getUserById = asyncHandler(async (req, res) => { res.json(await adminService.getUserById(req.params.id)); });
-const updateUser = asyncHandler(async (req, res) => { res.json(await adminService.updateUser(req.params.id, req.body)); });
-const banUser = asyncHandler(async (req, res) => { res.json(await adminService.banUser(req.params.id)); });
-const unbanUser = asyncHandler(async (req, res) => { res.json(await adminService.unbanUser(req.params.id)); });
-const deleteUser = asyncHandler(async (req, res) => { res.json(await adminService.deleteUser(req.params.id)); });
-const updateUserIdVerification = asyncHandler(async (req, res) => { res.json(await adminService.updateUserIdVerification(req.params.id, req.body)); });
+const updateUser = asyncHandler(async (req, res) => { res.json(await adminService.updateUser(req.params.id, req.body, req.user.id, req)); });
+const banUser = asyncHandler(async (req, res) => { res.json(await adminService.banUser(req.params.id, req.user.id, req)); });
+const unbanUser = asyncHandler(async (req, res) => { res.json(await adminService.unbanUser(req.params.id, req.user.id, req)); });
+const deleteUser = asyncHandler(async (req, res) => { res.json(await adminService.deleteUser(req.params.id, req.user.id, req)); });
+const updateUserIdVerification = asyncHandler(async (req, res) => { res.json(await adminService.updateUserIdVerification(req.params.id, req.body, req.user.id, req)); });
 
 // Complaints Management
 const getAllComplaints = asyncHandler(async (req, res) => { res.json(await adminService.getAllComplaints(req.query)); });
 const getComplaintById = asyncHandler(async (req, res) => { res.json(await adminService.getComplaintById(req.params.id)); });
-const replyComplaint = asyncHandler(async (req, res) => { res.json(await adminService.replyComplaint(req.params.id, req.body)); });
+const replyComplaint = asyncHandler(async (req, res) => { res.json(await adminService.replyComplaint(req.params.id, req.body, req.user.id, req)); });
 
 // Reports & Analytics
 const getRentalReport = asyncHandler(async (req, res) => { res.json(await adminService.getRentalReport(req.query)); });
@@ -44,20 +44,35 @@ const getUserReputationReport = asyncHandler(async (req, res) => { res.json(awai
 
 // Product/Category Management
 const getAllProducts = asyncHandler(async (req, res) => { res.json(await adminService.getAllProducts(req.query)); });
-const approveProduct = asyncHandler(async (req, res) => { res.json(await adminService.approveProduct(req.params.id, req.body)); });
+const approveProduct = asyncHandler(async (req, res) => { res.json(await adminService.approveProduct(req.params.id, req.body, req.user.id, req)); });
 const getAllCategories = asyncHandler(async (req, res) => { res.json(await adminService.getAllCategories(req.query)); });
-const createCategory = asyncHandler(async (req, res) => { res.json(await adminService.createCategory(req.body)); });
-const updateCategory = asyncHandler(async (req, res) => { res.json(await adminService.updateCategory(req.params.id, req.body)); });
-const deleteCategory = asyncHandler(async (req, res) => { res.json(await adminService.deleteCategory(req.params.id)); });
+const createCategory = asyncHandler(async (req, res) => { res.json(await adminService.createCategory(req.body, req.user.id, req)); });
+const updateCategory = asyncHandler(async (req, res) => { res.json(await adminService.updateCategory(req.params.id, req.body, req.user.id, req)); });
+const deleteCategory = asyncHandler(async (req, res) => { res.json(await adminService.deleteCategory(req.params.id, req.user.id, req)); });
 
 // System Settings & Static Content
 const getSettings = asyncHandler(async (req, res) => { res.json(await adminService.getSettings()); });
-const updateSettings = asyncHandler(async (req, res) => { res.json(await adminService.updateSettings(req.body)); });
-const getStaticPages = asyncHandler(async (req, res) => { res.json(await adminService.getStaticPages()); });
-const updateStaticPage = asyncHandler(async (req, res) => { res.json(await adminService.updateStaticPage(req.params.slug, req.body)); });
+const updateSettings = asyncHandler(async (req, res) => { 
+  const updateData = {
+    ...req.body,
+    updated_by_admin_id: req.user.id
+  };
+  res.json(await adminService.updateSettings(updateData, req.user.id, req)); 
+});
+
 
 const getProductReport = asyncHandler(async (req, res) => {
   res.json(await adminService.getProductReport(req.query));
+});
+
+// Admin Logs Management
+const getAdminLogs = asyncHandler(async (req, res) => {
+  const result = await adminService.getAdminLogs(req.query);
+  res.json({
+    success: true,
+    message: 'Admin logs retrieved successfully',
+    data: result
+  });
 });
 
 const adminController = {
@@ -66,8 +81,8 @@ const adminController = {
   getAllComplaints, getComplaintById, replyComplaint,
   getRentalReport, getIncomeReport, getPlatformStats, getComplaintReport, getUserReputationReport,
   getAllProducts, approveProduct, getAllCategories, createCategory, updateCategory, deleteCategory,
-  getSettings, updateSettings, getStaticPages, updateStaticPage,
-  getProductReport
+  getSettings, updateSettings,
+  getProductReport, getAdminLogs
 };
 
 export default adminController; 

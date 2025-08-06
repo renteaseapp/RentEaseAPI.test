@@ -11,6 +11,7 @@ const authenticateJWT = (req, res, next) => {
         const decoded = verifyToken(token);
 
         if (decoded && decoded.id) {
+            console.log('🔍 JWT decoded user:', decoded);
             req.user = decoded;
             next();
         } else {

@@ -405,11 +405,11 @@ CREATE TABLE rentals (
     calculated_subtotal_rental_fee DECIMAL(12, 2) NOT NULL,
     delivery_fee DECIMAL(12, 2) DEFAULT 0.00,
     late_fee_calculated DECIMAL(12, 2) NULL,
+    security_deposit_refund_amount DECIMAL(12, 2) NULL,
     platform_fee_renter DECIMAL(12, 2) DEFAULT 0.00,
     platform_fee_owner DECIMAL(12, 2) DEFAULT 0.00,
     total_amount_due DECIMAL(12, 2) NOT NULL,
     final_amount_paid DECIMAL(12, 2) NULL,
-    owner_payout_amount DECIMAL(12, 2) NULL,
     pickup_method rental_pickup_method_enum NOT NULL,
     return_method rental_return_method_enum NOT NULL,
     delivery_address_id BIGINT NULL,
@@ -440,7 +440,7 @@ CREATE TABLE rentals (
     CONSTRAINT fk_rentals_payment_verified_by FOREIGN KEY (payment_verified_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
     CONSTRAINT fk_rentals_cancelled_by FOREIGN KEY (cancelled_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
-COMMENT ON TABLE rentals IS 'ตารางข้อมูลการเช่าสินค้า';
+COMMENT ON TABLE rentals IS 'ตารางข้อมูลการเช่าสินค้า (เพิ่ม security_deposit_refund_amount สำหรับการคืนเงินประกัน)';
 COMMENT ON COLUMN rentals.id IS 'รหัสการเช่า (PK)';
 COMMENT ON COLUMN rentals.rental_uid IS 'รหัสอ้างอิงการเช่า (UUID)';
 COMMENT ON COLUMN rentals.renter_id IS 'รหัสผู้เช่า (FK to users.id)';
@@ -455,11 +455,11 @@ COMMENT ON COLUMN rentals.security_deposit_at_booking IS 'ค่ามัดจ�
 COMMENT ON COLUMN rentals.calculated_subtotal_rental_fee IS 'ค่าเช่าที่คำนวณได้ (จำนวนวัน x ราคาต่อวัน)';
 COMMENT ON COLUMN rentals.delivery_fee IS 'ค่าจัดส่ง (ถ้ามี)';
 COMMENT ON COLUMN rentals.late_fee_calculated IS 'ค่าปรับกรณีคืนล่าช้า (ถ้ามี)';
+COMMENT ON COLUMN rentals.security_deposit_refund_amount IS 'จำนวนเงินประกันที่จะคืนให้ผู้เช่า (หลังจากหักค่าปรับล่าช้าแล้ว)';
 COMMENT ON COLUMN rentals.platform_fee_renter IS 'ค่าธรรมเนียมแพลตฟอร์มฝั่งผู้เช่า';
 COMMENT ON COLUMN rentals.platform_fee_owner IS 'ค่าธรรมเนียมแพลตฟอร์มฝั่งผู้ให้เช่า';
 COMMENT ON COLUMN rentals.total_amount_due IS 'ยอดรวมที่ต้องชำระเบื้องต้น (ค่าเช่า + มัดจำ + ค่าส่ง + ค่าธรรมเนียมผู้เช่า)';
 COMMENT ON COLUMN rentals.final_amount_paid IS 'ยอดรวมที่ชำระจริง (รวมค่าปรับ, อื่นๆ)';
-COMMENT ON COLUMN rentals.owner_payout_amount IS 'ยอดเงินที่ผู้ให้เช่าจะได้รับ (หลังหักค่าธรรมเนียม)';
 COMMENT ON COLUMN rentals.pickup_method IS 'วิธีการรับสินค้า';
 COMMENT ON COLUMN rentals.return_method IS 'วิธีการคืนสินค้า';
 COMMENT ON COLUMN rentals.delivery_address_id IS 'ที่อยู่จัดส่ง (FK to user_addresses.id, ถ้า pickup_method = delivery)';
@@ -700,96 +700,7 @@ ALTER TABLE chat_conversations
 ADD CONSTRAINT fk_chat_conversations_last_message
 FOREIGN KEY (last_message_id) REFERENCES chat_messages(id) ON DELETE SET NULL;
 
--- ---------------------------------
--- ENUM Types for claims table (ประเภทข้อมูล Enum สำหรับตาราง claims)
--- ---------------------------------
-CREATE TYPE claim_type_enum AS ENUM('damage', 'loss', 'other');
-CREATE TYPE claim_status_enum AS ENUM('open', 'awaiting_renter_response', 'awaiting_owner_counter_response', 'negotiating', 'pending_admin_review', 'resolved_by_agreement', 'resolved_by_admin', 'closed_withdrawn', 'closed_paid');
 
--- ---------------------------------
--- Table: claims
--- ---------------------------------
-CREATE TABLE claims (
-    id BIGSERIAL PRIMARY KEY,
-    claim_uid UUID NOT NULL UNIQUE DEFAULT uuid_generate_v4(),
-    rental_id BIGINT NOT NULL UNIQUE,
-    reported_by_id BIGINT NOT NULL,
-    accused_id BIGINT NOT NULL,
-    claim_type claim_type_enum NOT NULL DEFAULT 'damage',
-    claim_details TEXT NOT NULL,
-    requested_amount DECIMAL(12, 2) NULL,
-    status claim_status_enum DEFAULT 'open',
-    renter_response_details TEXT NULL,
-    owner_counter_response_details TEXT NULL,
-    resolution_details TEXT NULL,
-    resolved_amount DECIMAL(12, 2) NULL,
-    admin_moderator_id BIGINT NULL,
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    closed_at TIMESTAMPTZ NULL,
-    CONSTRAINT fk_claims_rental FOREIGN KEY (rental_id) REFERENCES rentals(id) ON DELETE CASCADE,
-    CONSTRAINT fk_claims_reported_by FOREIGN KEY (reported_by_id) REFERENCES users(id) ON DELETE RESTRICT,
-    CONSTRAINT fk_claims_accused FOREIGN KEY (accused_id) REFERENCES users(id) ON DELETE RESTRICT,
-    CONSTRAINT fk_claims_admin_moderator FOREIGN KEY (admin_moderator_id) REFERENCES users(id) ON DELETE SET NULL
-);
-COMMENT ON TABLE claims IS 'ตารางการเคลมสินค้าเสียหายจากการเช่า';
-COMMENT ON COLUMN claims.id IS 'รหัสการเคลม (PK)';
-COMMENT ON COLUMN claims.claim_uid IS 'รหัสอ้างอิงการเคลม (UUID)';
-COMMENT ON COLUMN claims.rental_id IS 'รหัสการเช่าที่เกี่ยวข้อง (FK, 1 เคลมต่อ 1 การเช่า)';
-COMMENT ON COLUMN claims.reported_by_id IS 'ผู้รายงานการเคลม (FK to users.id, มักเป็น Owner)';
-COMMENT ON COLUMN claims.accused_id IS 'ผู้ถูกกล่าวหา (FK to users.id, มักเป็น Renter)';
-COMMENT ON COLUMN claims.claim_type IS 'ประเภทการเคลม';
-COMMENT ON COLUMN claims.claim_details IS 'รายละเอียดการเคลม';
-COMMENT ON COLUMN claims.requested_amount IS 'จำนวนเงินที่เรียกร้อง (ถ้ามี)';
-COMMENT ON COLUMN claims.status IS 'สถานะการเคลม';
-COMMENT ON COLUMN claims.renter_response_details IS 'คำชี้แจงจากผู้เช่า';
-COMMENT ON COLUMN claims.owner_counter_response_details IS 'การตอบกลับเพิ่มเติมจากผู้ให้เช่า';
-COMMENT ON COLUMN claims.resolution_details IS 'รายละเอียดการแก้ไขปัญหา/ผลการตัดสินจาก Admin';
-COMMENT ON COLUMN claims.resolved_amount IS 'จำนวนเงินที่ตกลง/ตัดสินให้ชดใช้';
-COMMENT ON COLUMN claims.admin_moderator_id IS 'Admin ผู้ไกล่เกลี่ย/ตัดสิน (FK to users.id)';
-COMMENT ON COLUMN claims.created_at IS 'เวลาที่สร้างการเคลม';
-COMMENT ON COLUMN claims.updated_at IS 'เวลาที่แก้ไขการเคลมล่าสุด';
-COMMENT ON COLUMN claims.closed_at IS 'เวลาที่ปิดการเคลม';
-
-CREATE INDEX idx_claims_status ON claims(status);
-CREATE INDEX idx_claims_rental_id ON claims(rental_id);
-
-CREATE TRIGGER set_timestamp_claims
-BEFORE UPDATE ON claims
-FOR EACH ROW
-EXECUTE FUNCTION trigger_set_timestamp();
-
--- ---------------------------------
--- ENUM Types for claim_attachments table (ประเภทข้อมูล Enum สำหรับตาราง claim_attachments)
--- ---------------------------------
-CREATE TYPE claim_uploader_role_enum AS ENUM('owner', 'renter', 'admin');
-
--- ---------------------------------
--- Table: claim_attachments
--- ---------------------------------
-CREATE TABLE claim_attachments (
-    id BIGSERIAL PRIMARY KEY,
-    claim_id BIGINT NOT NULL,
-    uploaded_by_id BIGINT NOT NULL,
-    uploader_role claim_uploader_role_enum NOT NULL,
-    file_url VARCHAR(255) NOT NULL,
-    file_type VARCHAR(100) NULL,
-    description VARCHAR(255) NULL,
-    uploaded_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_claim_attachments_claim FOREIGN KEY (claim_id) REFERENCES claims(id) ON DELETE CASCADE,
-    CONSTRAINT fk_claim_attachments_uploaded_by FOREIGN KEY (uploaded_by_id) REFERENCES users(id) ON DELETE RESTRICT
-);
-COMMENT ON TABLE claim_attachments IS 'ตารางไฟล์แนบสำหรับการเคลม';
-COMMENT ON COLUMN claim_attachments.id IS 'รหัสไฟล์แนบ (PK)';
-COMMENT ON COLUMN claim_attachments.claim_id IS 'รหัสการเคลม (FK)';
-COMMENT ON COLUMN claim_attachments.uploaded_by_id IS 'ผู้อัปโหลดไฟล์ (FK to users.id, owner or renter)';
-COMMENT ON COLUMN claim_attachments.uploader_role IS 'บทบาทของผู้อัปโหลดในเคลมนี้';
-COMMENT ON COLUMN claim_attachments.file_url IS 'URL ไฟล์แนบ';
-COMMENT ON COLUMN claim_attachments.file_type IS 'ประเภทไฟล์ (เช่น image/jpeg, application/pdf)';
-COMMENT ON COLUMN claim_attachments.description IS 'คำอธิบายไฟล์';
-COMMENT ON COLUMN claim_attachments.uploaded_at IS 'เวลาที่อัปโหลด';
-
-CREATE INDEX idx_claim_attachments_claim_id ON claim_attachments(claim_id);
 
 -- ---------------------------------
 -- ENUM Types for complaints table (ประเภทข้อมูล Enum สำหรับตาราง complaints)
@@ -929,34 +840,7 @@ COMMENT ON COLUMN wishlist.user_id IS 'รหัสผู้ใช้ (FK)';
 COMMENT ON COLUMN wishlist.product_id IS 'รหัสสินค้า (FK)';
 COMMENT ON COLUMN wishlist.added_at IS 'เวลาที่เพิ่มเข้า Wishlist';
 
--- ---------------------------------
--- Table: tags
--- ---------------------------------
-CREATE TABLE tags (
-    id BIGSERIAL PRIMARY KEY,
-    name VARCHAR(50) NOT NULL UNIQUE,
-    slug VARCHAR(60) NOT NULL UNIQUE,
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-);
-COMMENT ON TABLE tags IS 'ตารางเก็บแท็กสำหรับสินค้า (ถ้ามีระบบแท็ก)';
-COMMENT ON COLUMN tags.id IS 'รหัสแท็ก (PK)';
-COMMENT ON COLUMN tags.name IS 'ชื่อแท็ก (เช่น #กล้องฟิล์ม, #อุปกรณ์เดินป่า)';
-COMMENT ON COLUMN tags.slug IS 'Slug ของแท็ก';
-COMMENT ON COLUMN tags.created_at IS 'เวลาที่สร้างแท็ก';
 
--- ---------------------------------
--- Table: product_tags
--- ---------------------------------
-CREATE TABLE product_tags (
-    product_id BIGINT NOT NULL,
-    tag_id BIGINT NOT NULL,
-    PRIMARY KEY (product_id, tag_id),
-    CONSTRAINT fk_product_tags_product FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
-    CONSTRAINT fk_product_tags_tag FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE
-);
-COMMENT ON TABLE product_tags IS 'ตารางเชื่อมโยงสินค้ากับแท็ก (Many-to-Many)';
-COMMENT ON COLUMN product_tags.product_id IS 'รหัสสินค้า (FK)';
-COMMENT ON COLUMN product_tags.tag_id IS 'รหัสแท็ก (FK)';
 
 -- ---------------------------------
 -- ENUM Types for payment_transactions table (ประเภทข้อมูล Enum สำหรับตาราง payment_transactions)
@@ -1050,67 +934,7 @@ COMMENT ON COLUMN admin_logs.ip_address IS 'IP Address ของ Admin';
 COMMENT ON COLUMN admin_logs.user_agent IS 'User Agent ของ Admin';
 COMMENT ON COLUMN admin_logs.created_at IS 'เวลาที่บันทึก Log';
 
--- ---------------------------------
--- Table: faq_categories
--- ---------------------------------
-CREATE TABLE faq_categories (
-    id BIGSERIAL PRIMARY KEY,
-    name VARCHAR(100) NOT NULL UNIQUE,
-    name_en VARCHAR(100) UNIQUE,
-    sort_order INT DEFAULT 0,
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-);
-COMMENT ON TABLE faq_categories IS 'ตารางหมวดหมู่ของคำถามที่พบบ่อย (FAQ)';
-COMMENT ON COLUMN faq_categories.id IS 'รหัสหมวดหมู่ FAQ (PK)';
-COMMENT ON COLUMN faq_categories.name IS 'ชื่อหมวดหมู่ FAQ (ภาษาหลัก)';
-COMMENT ON COLUMN faq_categories.name_en IS 'ชื่อหมวดหมู่ FAQ (ภาษาอังกฤษ)';
-COMMENT ON COLUMN faq_categories.sort_order IS 'ลำดับการแสดงผล';
-COMMENT ON COLUMN faq_categories.is_active IS 'สถานะการใช้งาน';
-COMMENT ON COLUMN faq_categories.created_at IS 'เวลาที่สร้าง';
-COMMENT ON COLUMN faq_categories.updated_at IS 'เวลาที่แก้ไขล่าสุด';
 
-CREATE TRIGGER set_timestamp_faq_categories
-BEFORE UPDATE ON faq_categories
-FOR EACH ROW
-EXECUTE FUNCTION trigger_set_timestamp();
-
--- ---------------------------------
--- Table: faqs
--- ---------------------------------
-CREATE TABLE faqs (
-    id BIGSERIAL PRIMARY KEY,
-    faq_category_id BIGINT NULL,
-    question TEXT NOT NULL,
-    question_en TEXT NULL,
-    answer TEXT NOT NULL,
-    answer_en TEXT NULL,
-    sort_order INT DEFAULT 0,
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    updated_by_admin_id BIGINT NULL,
-    CONSTRAINT fk_faqs_category FOREIGN KEY (faq_category_id) REFERENCES faq_categories(id) ON DELETE SET NULL,
-    CONSTRAINT fk_faqs_updated_by_admin FOREIGN KEY (updated_by_admin_id) REFERENCES users(id) ON DELETE SET NULL
-);
-COMMENT ON TABLE faqs IS 'ตารางคำถามที่พบบ่อย (FAQ)';
-COMMENT ON COLUMN faqs.id IS 'รหัส FAQ (PK)';
-COMMENT ON COLUMN faqs.faq_category_id IS 'รหัสหมวดหมู่ FAQ (FK)';
-COMMENT ON COLUMN faqs.question IS 'คำถาม (ภาษาหลัก)';
-COMMENT ON COLUMN faqs.question_en IS 'คำถาม (ภาษาอังกฤษ)';
-COMMENT ON COLUMN faqs.answer IS 'คำตอบ (HTML, ภาษาหลัก)';
-COMMENT ON COLUMN faqs.answer_en IS 'คำตอบ (HTML, ภาษาอังกฤษ)';
-COMMENT ON COLUMN faqs.sort_order IS 'ลำดับการแสดงผล';
-COMMENT ON COLUMN faqs.is_active IS 'สถานะการใช้งาน';
-COMMENT ON COLUMN faqs.created_at IS 'เวลาที่สร้าง';
-COMMENT ON COLUMN faqs.updated_at IS 'เวลาที่แก้ไขล่าสุด';
-COMMENT ON COLUMN faqs.updated_by_admin_id IS 'Admin ที่แก้ไขล่าสุด (FK to users.id)';
-
-CREATE TRIGGER set_timestamp_faqs
-BEFORE UPDATE ON faqs
-FOR EACH ROW
-EXECUTE FUNCTION trigger_set_timestamp();
 
 -- ---------------------------------
 -- ENUM Types for system_settings table (ประเภทข้อมูล Enum สำหรับตาราง system_settings)
@@ -1150,83 +974,6 @@ BEFORE UPDATE ON system_settings
 FOR EACH ROW
 EXECUTE FUNCTION trigger_set_timestamp();
 
--- ---------------------------------
--- Table: static_pages
--- ---------------------------------
-CREATE TABLE static_pages (
-    id SERIAL PRIMARY KEY,
-    slug VARCHAR(100) NOT NULL UNIQUE,
-    title VARCHAR(255) NOT NULL,
-    title_en VARCHAR(255) NULL,
-    content_html TEXT NOT NULL,
-    content_html_en TEXT NULL,
-    meta_title VARCHAR(255) NULL,
-    meta_description TEXT NULL,
-    is_published BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    updated_by_admin_id BIGINT NULL,
-    CONSTRAINT fk_static_pages_admin FOREIGN KEY (updated_by_admin_id) REFERENCES users(id) ON DELETE SET NULL
-);
-COMMENT ON TABLE static_pages IS 'ตารางเนื้อหาสำหรับหน้า Static (เช่น Terms, Privacy, About Us)';
-COMMENT ON COLUMN static_pages.id IS 'รหัสหน้า (PK)';
-COMMENT ON COLUMN static_pages.slug IS 'Slug สำหรับ URL (เช่น terms-and-conditions, privacy-policy)';
-COMMENT ON COLUMN static_pages.title IS 'หัวข้อหน้า (ภาษาหลัก)';
-COMMENT ON COLUMN static_pages.title_en IS 'หัวข้อหน้า (ภาษาอังกฤษ)';
-COMMENT ON COLUMN static_pages.content_html IS 'เนื้อหาหน้า (HTML, ภาษาหลัก)';
-COMMENT ON COLUMN static_pages.content_html_en IS 'เนื้อหาหน้า (HTML, ภาษาอังกฤษ)';
-COMMENT ON COLUMN static_pages.meta_title IS 'Meta Title (สำหรับ SEO)';
-COMMENT ON COLUMN static_pages.meta_description IS 'Meta Description (สำหรับ SEO)';
-COMMENT ON COLUMN static_pages.is_published IS 'เผยแพร่หน้านี้หรือไม่';
-COMMENT ON COLUMN static_pages.created_at IS 'เวลาที่สร้าง';
-COMMENT ON COLUMN static_pages.updated_at IS 'เวลาที่แก้ไขล่าสุด';
-COMMENT ON COLUMN static_pages.updated_by_admin_id IS 'Admin ที่แก้ไขล่าสุด (FK to users.id)';
 
-CREATE TRIGGER set_timestamp_static_pages
-BEFORE UPDATE ON static_pages
-FOR EACH ROW
-EXECUTE FUNCTION trigger_set_timestamp();
 
--- ---------------------------------
--- ENUM Types for contact_form_submissions table (ประเภทข้อมูล Enum สำหรับตาราง contact_form_submissions)
--- ---------------------------------
-CREATE TYPE contact_form_status_enum AS ENUM('new', 'read', 'replied', 'closed');
 
--- ---------------------------------
--- Table: contact_form_submissions
--- ---------------------------------
-CREATE TABLE contact_form_submissions (
-    id BIGSERIAL PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
-    email VARCHAR(255) NOT NULL,
-    phone VARCHAR(20) NULL,
-    subject VARCHAR(255) NOT NULL,
-    message TEXT NOT NULL,
-    ip_address VARCHAR(45) NULL,
-    user_agent TEXT NULL,
-    status contact_form_status_enum DEFAULT 'new',
-    replied_by_admin_id BIGINT NULL,
-    replied_at TIMESTAMPTZ NULL,
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_contact_submissions_admin FOREIGN KEY (replied_by_admin_id) REFERENCES users(id) ON DELETE SET NULL
-);
-COMMENT ON TABLE contact_form_submissions IS 'ตารางเก็บข้อความจากหน้าติดต่อเรา (ถ้าต้องการเก็บใน DB)';
-COMMENT ON COLUMN contact_form_submissions.id IS 'รหัสข้อความติดต่อ (PK)';
-COMMENT ON COLUMN contact_form_submissions.name IS 'ชื่อผู้ติดต่อ';
-COMMENT ON COLUMN contact_form_submissions.email IS 'อีเมลผู้ติดต่อ';
-COMMENT ON COLUMN contact_form_submissions.phone IS 'เบอร์โทรผู้ติดต่อ';
-COMMENT ON COLUMN contact_form_submissions.subject IS 'หัวข้อเรื่อง';
-COMMENT ON COLUMN contact_form_submissions.message IS 'ข้อความ';
-COMMENT ON COLUMN contact_form_submissions.ip_address IS 'IP Address ผู้ส่ง';
-COMMENT ON COLUMN contact_form_submissions.user_agent IS 'User Agent ผู้ส่ง';
-COMMENT ON COLUMN contact_form_submissions.status IS 'สถานะการจัดการข้อความ';
-COMMENT ON COLUMN contact_form_submissions.replied_by_admin_id IS 'Admin ที่ตอบกลับ (FK to users.id)';
-COMMENT ON COLUMN contact_form_submissions.replied_at IS 'เวลาที่ตอบกลับ';
-COMMENT ON COLUMN contact_form_submissions.created_at IS 'เวลาที่ส่งข้อความ';
-COMMENT ON COLUMN contact_form_submissions.updated_at IS 'เวลาที่แก้ไขล่าสุด';
-
-CREATE TRIGGER set_timestamp_contact_form_submissions
-BEFORE UPDATE ON contact_form_submissions
-FOR EACH ROW
-EXECUTE FUNCTION trigger_set_timestamp();

@@ -203,7 +203,25 @@ const RentalModel = {
     },
 
     // Find methods for Owner/Renter dashboards will be added in Day 4
-    async findByIdAndOwner(rentalId, ownerId) { /* ... For Day 4 ... */ },
+    async findByIdAndOwner(rentalId, ownerId) {
+        const { data, error } = await supabase
+            .from('rentals')
+            .select('*')
+            .eq('id', rentalId)
+            .eq('owner_id', ownerId)
+            .single();
+
+        if (error) {
+            if (error.code === 'PGRST116') {
+                return null; // Not found
+            }
+            console.error("Error finding rental by ID and owner:", error);
+            throw error;
+        }
+
+        return data;
+    },
+    
     async findByIdAndRenter(rentalId, renterId) { /* ... For Day 4 ... */ },
     async updateStatus(rentalId, statusData, userId, userRole = 'system') { /* ... For Day 4 ... */ }
 };

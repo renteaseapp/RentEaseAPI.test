@@ -39,11 +39,25 @@ const AuthService = {
 
         await UserModel.updateLastLogin(user.id);
 
+        // Determine user role based on admin status and other criteria
+        let userRole = 'user'; // default role
+        if (isAdmin) {
+            userRole = 'admin';
+        } else {
+            // You can add logic here to determine if user is owner or renter
+            // For now, we'll use a simple check - you might want to enhance this
+            const userDetails = await UserModel.findById(user.id);
+            if (userDetails && userDetails.role) {
+                userRole = userDetails.role;
+            }
+        }
+
         const tokenPayload = {
             id: user.id,
             email: user.email,
             first_name: user.first_name,
             is_admin: isAdmin,
+            role: userRole, // Add role to token payload
         };
         const accessToken = generateToken(tokenPayload);
 

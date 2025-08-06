@@ -1,6 +1,8 @@
 import ProductModel from '../models/product.model.js';
 import RentalModel from '../models/rental.model.js'; // For future rental stats
 import supabase from '../db/supabaseClient.js';
+import { ApiError } from '../utils/apiError.js';
+import httpStatusCodes from '../constants/httpStatusCodes.js';
 
 const OwnerService = {
     async getOwnerDashboardStats(ownerId) {
@@ -18,21 +20,28 @@ const OwnerService = {
             .eq('owner_id', ownerId)
             .eq('rental_status', 'active');
 
-        // 3. Estimated monthly revenue (sum owner_payout_amount ของ rentals ที่จบเดือนนี้และจ่ายเงินแล้ว)
+        // 3. Estimated monthly revenue (sum ของ rentals ที่จบเดือนนี้และจ่ายเงินแล้ว)
         // เงื่อนไข: owner_id, payment_status = 'paid', actual_return_time ในเดือนนี้
         const now = new Date();
         const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
         const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999).toISOString();
         const { data: revenueRows, error: revenueError } = await supabase
             .from('rentals')
-            .select('owner_payout_amount, actual_return_time')
+            .select('final_amount_paid, total_amount_due, platform_fee_owner, late_fee_calculated, actual_return_time')
             .eq('owner_id', ownerId)
             .eq('payment_status', 'paid')
             .gte('actual_return_time', monthStart)
             .lte('actual_return_time', monthEnd);
         let estimatedMonthlyRevenue = 0;
         if (revenueRows && Array.isArray(revenueRows)) {
-            estimatedMonthlyRevenue = revenueRows.reduce((sum, r) => sum + (parseFloat(r.owner_payout_amount) || 0), 0);
+            estimatedMonthlyRevenue = revenueRows.reduce((sum, r) => {
+                // คำนวณรายได้ที่แท้จริง: เงินที่ชำระ - ค่าธรรมเนียมแพลตฟอร์ม
+                // ค่าปรับล่าช้าไม่รวมในรายได้เพราะหักจากเงินประกันแล้ว
+                const base = r.final_amount_paid ?? r.total_amount_due ?? 0;
+                const platformFee = r.platform_fee_owner ?? 0;
+                const payout = base - platformFee;
+                return sum + (parseFloat(payout) || 0);
+            }, 0);
         }
 
         // 4. Pending rental requests (rental_status: 'pending_owner_approval')
@@ -57,11 +66,18 @@ const OwnerService = {
             // pending_rental_requests_summary: [] // TODO
         };
     },
-    async updateRentalDeliveryStatus(rentalId, { delivery_status, tracking_number, carrier_code }) {
+    async updateRentalDeliveryStatus(rentalId, ownerId, { delivery_status, tracking_number, carrier_code }) {
+        // First verify that the rental belongs to this owner
+        const rental = await RentalModel.findByIdAndOwner(rentalId, ownerId);
+        if (!rental) {
+            throw new ApiError(httpStatusCodes.NOT_FOUND, 'Rental not found or you do not have permission to update it');
+        }
+
         const { data, error } = await supabase
             .from('rentals')
             .update({ delivery_status, tracking_number, carrier_code })
             .eq('id', rentalId)
+            .eq('owner_id', ownerId) // Double-check ownership
             .select('*')
             .single();
         if (error) throw error;
@@ -109,10 +125,10 @@ const OwnerService = {
             .eq('owner_id', ownerId)
             .in('rental_status', ['cancelled_by_renter', 'cancelled_by_owner', 'rejected_by_owner']);
 
-        // 3. รายได้รวม/รายได้เดือนนี้ (แก้ logic ตรงนี้)
+        // 3. รายได้รวม/รายได้เดือนนี้
         const { data: revenueRows } = await supabase
             .from('rentals')
-            .select('owner_payout_amount, final_amount_paid, total_amount_due, platform_fee_owner, actual_return_time, payment_status, rental_status, id')
+            .select('final_amount_paid, total_amount_due, platform_fee_owner, late_fee_calculated, actual_return_time, payment_status, rental_status, id, security_deposit_at_booking, security_deposit_refund_amount')
             .eq('owner_id', ownerId)
             .eq('payment_status', 'paid');
         console.log('revenueRows', revenueRows);
@@ -122,22 +138,19 @@ const OwnerService = {
         const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
         if (revenueRows && Array.isArray(revenueRows)) {
             totalRevenue = revenueRows.reduce((sum, r) => {
-                let payout = r.owner_payout_amount;
-                if (payout == null) {
-                    // fallback: final_amount_paid - platform_fee_owner
-                    const base = r.final_amount_paid ?? r.total_amount_due ?? 0;
-                    payout = base - (r.platform_fee_owner ?? 0);
-                }
+                // คำนวณรายได้ที่แท้จริง: เงินที่ชำระ - ค่าธรรมเนียมแพลตฟอร์ม
+                // ค่าปรับล่าช้าไม่รวมในรายได้เพราะหักจากเงินประกันแล้ว
+                const base = r.final_amount_paid ?? r.total_amount_due ?? 0;
+                const platformFee = r.platform_fee_owner ?? 0;
+                const payout = base - platformFee;
                 return sum + (parseFloat(payout) || 0);
             }, 0);
             revenueThisMonth = revenueRows
                 .filter(r => r.actual_return_time && new Date(r.actual_return_time) >= monthStart && new Date(r.actual_return_time) <= monthEnd)
                 .reduce((sum, r) => {
-                    let payout = r.owner_payout_amount;
-                    if (payout == null) {
-                        const base = r.final_amount_paid ?? r.total_amount_due ?? 0;
-                        payout = base - (r.platform_fee_owner ?? 0);
-                    }
+                    const base = r.final_amount_paid ?? r.total_amount_due ?? 0;
+                    const platformFee = r.platform_fee_owner ?? 0;
+                    const payout = base - platformFee;
                     return sum + (parseFloat(payout) || 0);
                 }, 0);
         }
@@ -172,7 +185,7 @@ const OwnerService = {
         // Top 3 popular products by rental count (JS aggregate only)
         const { data: rentalsAll } = await supabase
             .from('rentals')
-            .select('product_id, owner_id, owner_payout_amount, final_amount_paid, total_amount_due, platform_fee_owner, payment_status, rental_status')
+            .select('product_id, owner_id, final_amount_paid, total_amount_due, platform_fee_owner, late_fee_calculated, payment_status, rental_status')
             .eq('owner_id', ownerId);
 
         // Query product titles
@@ -194,11 +207,11 @@ const OwnerService = {
             productStats[r.product_id].rental_count++;
             // รวมรายได้เฉพาะ rental ที่จ่ายเงินสำเร็จและจบจริง
             if (r.payment_status === 'paid' && r.rental_status === 'completed') {
-                let payout = r.owner_payout_amount;
-                if (payout == null) {
-                    const base = r.final_amount_paid ?? r.total_amount_due ?? 0;
-                    payout = base - (r.platform_fee_owner ?? 0);
-                }
+                // คำนวณรายได้ที่แท้จริง: เงินที่ชำระ - ค่าธรรมเนียมแพลตฟอร์ม
+                // ค่าปรับล่าช้าไม่รวมในรายได้เพราะหักจากเงินประกันแล้ว
+                const base = r.final_amount_paid ?? r.total_amount_due ?? 0;
+                const platformFee = r.platform_fee_owner ?? 0;
+                const payout = base - platformFee;
                 productStats[r.product_id].total_revenue += parseFloat(payout) || 0;
             }
         });

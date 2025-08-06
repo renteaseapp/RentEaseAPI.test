@@ -12,6 +12,19 @@ import supabaseClient from '../db/supabaseClient.js';
 import path from 'path'; // To handle file paths
 import { v4 as uuidv4 } from 'uuid'; // To generate unique filenames
 
+// Import realtime event emitters
+import { 
+    emitProductCreated, 
+    emitProductUpdate, 
+    emitProductDeleted,
+    emitQuantityUpdate,
+    emitNotificationToUser,
+    emitNotificationToRole
+} from '../server.js';
+
+// Import system settings model
+import SystemSettingModel from '../models/systemSetting.model.js';
+
 // Use the imported client
 const supabase = supabaseClient; // Assign the imported client to a variable named supabase
 
@@ -86,14 +99,31 @@ const ProductService = {
 
         const imageUrls = [];
 
+        // Get system settings for validation
+        const maxImagesSetting = await SystemSettingModel.getSetting('max_images_per_product', '10');
+        const maxFileSizeSetting = await SystemSettingModel.getSetting('max_file_size_mb', '10');
+        const maxImages = parseInt(maxImagesSetting.setting_value, 10);
+        const maxFileSizeMB = parseInt(maxFileSizeSetting.setting_value, 10);
+        
         // Upload images to Supabase Storage if files are provided
         if (productImages && Array.isArray(productImages) && productImages.length > 0) {
+            // Validate image count
+            if (productImages.length > maxImages) {
+                throw new ApiError(httpStatusCodes.BAD_REQUEST, `Maximum ${maxImages} images allowed per product`);
+            }
+            
             console.log(`Uploading ${productImages.length} images for product`);
             
             for (const file of productImages) {
                 if (!file || !file.buffer) {
                     console.warn('Skipping invalid file:', file);
                     continue;
+                }
+                
+                // Validate file size
+                const fileSizeMB = file.size / (1024 * 1024);
+                if (fileSizeMB > maxFileSizeMB) {
+                    throw new ApiError(httpStatusCodes.BAD_REQUEST, `File size exceeds maximum allowed size of ${maxFileSizeMB}MB`);
                 }
                 
                 const fileExtension = path.extname(file.originalname);
@@ -132,12 +162,18 @@ const ProductService = {
             console.log('No images provided for product');
         }
 
+        // Check auto-approve setting
+        const autoApproveSetting = await SystemSettingModel.getSetting('auto_approve_products', 'true');
+        const autoApprove = autoApproveSetting.setting_value === 'true';
+        
         const productWithOwner = {
             ...productData,
             owner_id: ownerId,
             slug,
-            admin_approval_status: 'approved',
-            availability_status: 'available',
+            admin_approval_status: autoApprove ? 'approved' : 'pending',
+            admin_approval_notes: autoApprove ? 'approv auto' : null,
+            availability_status: autoApprove ? 'available' : 'draft',
+            published_at: autoApprove ? new Date().toISOString() : null,
             image_urls: imageUrls
         };
 
@@ -145,6 +181,21 @@ const ProductService = {
         if (!newProduct) {
              // This case should ideally be caught by the error check inside ProductModel.create
             throw new ApiError(httpStatusCodes.INTERNAL_SERVER_ERROR, "Failed to create product record.");
+        }
+
+        // Emit realtime events
+        emitProductCreated(newProduct);
+        
+        // Notify admins about new product only if auto-approve is disabled
+        if (!autoApprove) {
+            emitNotificationToRole('admin', {
+                type: 'new_product',
+                title: 'สินค้าใหม่รอการอนุมัติ',
+                message: `มีสินค้าใหม่รอการอนุมัติ: ${newProduct.title}`,
+                link_url: `/admin/products/${newProduct.id}`,
+                related_entity_type: 'product',
+                related_entity_id: newProduct.id
+            });
         }
 
         return newProduct;
@@ -329,6 +380,9 @@ const ProductService = {
             throw new ApiError(httpStatusCodes.INTERNAL_SERVER_ERROR, "Failed to retrieve updated product details.");
         }
 
+        // Emit realtime events
+        emitProductUpdate(updatedProduct.id, updatedProduct);
+
         return updatedProduct;
     },
 
@@ -458,6 +512,9 @@ const ProductService = {
             console.error("Error deleting product record from database:", deleteDbError);
             throw new ApiError(httpStatusCodes.INTERNAL_SERVER_ERROR, "Failed to delete product record.");
         }
+
+        // Emit realtime events
+        emitProductDeleted(existingProduct.id);
 
         // No need to return the deleted product
         return null; // Indicate successful deletion

@@ -4,7 +4,7 @@ import PayoutController from '../controllers/payout.controller.js';
 import authenticateJWT from '../middleware/authenticateJWT.js';
 import validateRequest from '../middleware/validateRequest.js';
 import { paginationSchema } from '../DTOs/common.dto.js'; // For listing products
-import { rentalListingQuerySchema } from '../DTOs/rental.dto.js'; // Import rental listing schema
+import { rentalListingQuerySchema, deliveryStatusUpdateSchema } from '../DTOs/rental.dto.js'; // Import rental listing schema
 import { payoutMethodSchema } from '../DTOs/payout.dto.js'; // Import payout method schema
 import Joi from 'joi'; // For query validation
 
@@ -31,6 +31,13 @@ router.get(
     '/me/rentals',
     validateRequest(rentalListingQuerySchema, 'query'), // Use the DTO for rental listing
     OwnerController.getMyRentals
+);
+
+// Delivery Status Update Route
+router.put(
+    '/rentals/:id/delivery-status',
+    validateRequest(deliveryStatusUpdateSchema, 'body'),
+    OwnerController.updateRentalDeliveryStatus
 );
 
 // Payout Methods Routes

@@ -4,6 +4,7 @@ import { generateToken } from '../utils/jwt.utils.js';
 import { comparePassword } from '../utils/password.utils.js';
 import httpStatusCodes from '../constants/httpStatusCodes.js';
 import { ApiError } from '../utils/apiError.js';
+import AdminLogger from '../utils/adminLogger.js';
 
 // Login
 async function login(email_or_username, password) {
@@ -67,22 +68,72 @@ async function getUserById(id) {
   if (error) throw error;
   return data;
 }
-async function updateUser(id, body) {
-  return await UserModel.update(Number(id), body);
+async function updateUser(id, body, adminUserId = null, req = null) {
+  const result = await UserModel.update(Number(id), body);
+  
+  // Log admin action
+  if (adminUserId) {
+    await AdminLogger.logUserAction(adminUserId, 'USER_UPDATE', Number(id), {
+      updated_fields: Object.keys(body),
+      new_values: body
+    }, req);
+  }
+  
+  return result;
 }
-async function banUser(id) {
-  return await UserModel.update(Number(id), { is_active: false });
+async function banUser(id, adminUserId = null, req = null) {
+  const result = await UserModel.update(Number(id), { is_active: false });
+  
+  // Log admin action
+  if (adminUserId) {
+    await AdminLogger.logUserAction(adminUserId, 'USER_BAN', Number(id), {
+      action: 'User banned',
+      reason: 'Admin action'
+    }, req);
+  }
+  
+  return result;
 }
-async function unbanUser(id) {
-  return await UserModel.update(Number(id), { is_active: true });
+async function unbanUser(id, adminUserId = null, req = null) {
+  const result = await UserModel.update(Number(id), { is_active: true });
+  
+  // Log admin action
+  if (adminUserId) {
+    await AdminLogger.logUserAction(adminUserId, 'USER_UNBAN', Number(id), {
+      action: 'User unbanned',
+      reason: 'Admin action'
+    }, req);
+  }
+  
+  return result;
 }
-async function deleteUser(id) {
+async function deleteUser(id, adminUserId = null, req = null) {
   // soft delete
-  return await UserModel.update(Number(id), { deleted_at: new Date().toISOString() });
+  const result = await UserModel.update(Number(id), { deleted_at: new Date().toISOString() });
+  
+  // Log admin action
+  if (adminUserId) {
+    await AdminLogger.logUserAction(adminUserId, 'USER_DELETE', Number(id), {
+      action: 'User soft deleted',
+      reason: 'Admin action'
+    }, req);
+  }
+  
+  return result;
 }
-async function updateUserIdVerification(id, body) {
+async function updateUserIdVerification(id, body, adminUserId = null, req = null) {
   // อัปเดตฟิลด์ยืนยันตัวตน
-  return await UserModel.update(Number(id), body);
+  const result = await UserModel.update(Number(id), body);
+  
+  // Log admin action
+  if (adminUserId) {
+    await AdminLogger.logUserAction(adminUserId, 'USER_VERIFICATION_UPDATE', Number(id), {
+      updated_fields: Object.keys(body),
+      new_values: body
+    }, req);
+  }
+  
+  return result;
 }
 
 // Complaints Management
@@ -124,7 +175,7 @@ async function getComplaintById(id) {
   }
   return data;
 }
-async function replyComplaint(id, body) {
+async function replyComplaint(id, body, adminUserId = null, req = null) {
   // อัปเดตสถานะ/ตอบกลับร้องเรียน
   const { data, error } = await supabase
     .from('complaints')
@@ -133,6 +184,15 @@ async function replyComplaint(id, body) {
     .select('*')
     .single();
   if (error) throw error;
+  
+  // Log admin action
+  if (adminUserId) {
+    await AdminLogger.logComplaintAction(adminUserId, 'COMPLAINT_REPLY', Number(id), {
+      updated_fields: Object.keys(body),
+      new_values: body
+    }, req);
+  }
+  
   return data;
 }
 
@@ -185,22 +245,104 @@ async function getComplaintReport() {
 }
 
 async function getUserReputationReport() {
-  // รายงานคะแนนรีวิวของผู้ให้เช่า (owner)
-  const { data, error } = await supabase.from('reviews').select('owner_id, rating_owner');
-  if (error) throw error;
-  // group by owner_id
-  const map = {};
-  (data || []).forEach(r => {
-    if (!map[r.owner_id]) map[r.owner_id] = { total: 0, count: 0 };
-    map[r.owner_id].total += Number(r.rating_owner);
-    map[r.owner_id].count += 1;
+  try {
+    // รายงานคะแนนรีวิวของผู้ให้เช่า (owner) - แสดงทุก owner ที่มีสินค้า
+    const { data: reviews, error: reviewsError } = await supabase
+      .from('reviews')
+      .select('owner_id, rating_owner');
+    if (reviewsError) {
+      console.error('Error fetching reviews:', reviewsError);
+      throw reviewsError;
+    }
+
+    // ดึงข้อมูล owner ทั้งหมดที่มีสินค้า
+    const { data: owners, error: ownersError } = await supabase
+      .from('products')
+      .select('owner_id')
+      .not('owner_id', 'is', null);
+    if (ownersError) {
+      console.error('Error fetching owners:', ownersError);
+      throw ownersError;
+    }
+
+    // ดึงข้อมูล user details สำหรับ owner ทั้งหมด
+    const uniqueOwnerIds = [...new Set((owners || []).map(p => p.owner_id))];
+    let userDetails = {};
+    if (uniqueOwnerIds.length > 0) {
+      const { data: users, error: usersError } = await supabase
+        .from('users')
+        .select('id, username, first_name, last_name, email')
+        .in('id', uniqueOwnerIds);
+      if (usersError) {
+        console.error('Error fetching user details:', usersError);
+        throw usersError;
+      }
+      // สร้าง map ของ user details
+      (users || []).forEach(user => {
+        userDetails[user.id] = user;
+      });
+    }
+
+    // นับจำนวนสินค้าของแต่ละ owner
+    const { data: productCounts, error: productCountsError } = await supabase
+      .from('products')
+      .select('owner_id')
+      .not('owner_id', 'is', null);
+    if (productCountsError) {
+      console.error('Error fetching product counts:', productCountsError);
+      throw productCountsError;
+    }
+
+  const productCountMap = {};
+  (productCounts || []).forEach(p => {
+    if (!productCountMap[p.owner_id]) productCountMap[p.owner_id] = 0;
+    productCountMap[p.owner_id] += 1;
   });
-  const reputations = Object.entries(map).map(([owner_id, v]) => ({
-    owner_id: Number(owner_id),
-    avg_rating: v.count ? v.total / v.count : 0,
-    review_count: v.count
-  }));
-  return { reputations };
+
+  // สร้าง map ของ reviews
+  const reviewMap = {};
+  (reviews || []).forEach(r => {
+    if (!reviewMap[r.owner_id]) reviewMap[r.owner_id] = { total: 0, count: 0 };
+    reviewMap[r.owner_id].total += Number(r.rating_owner);
+    reviewMap[r.owner_id].count += 1;
+  });
+
+      // สร้าง map ของ unique owners
+    const ownerMap = {};
+    (owners || []).forEach(p => {
+      if (p.owner_id && !ownerMap[p.owner_id]) {
+        ownerMap[p.owner_id] = {
+          owner_id: p.owner_id,
+          owner_info: userDetails[p.owner_id]
+        };
+      }
+    });
+
+  // รวมข้อมูล owner และ reviews
+  const reputations = Object.keys(ownerMap).map(ownerId => {
+    const ownerIdNum = Number(ownerId);
+    const reviewData = reviewMap[ownerIdNum] || { total: 0, count: 0 };
+    const ownerInfo = ownerMap[ownerIdNum].owner_info;
+    const productCount = productCountMap[ownerIdNum] || 0;
+    
+    return {
+      owner_id: ownerIdNum,
+      owner_name: ownerInfo ? `${ownerInfo.first_name || ''} ${ownerInfo.last_name || ''}`.trim() || ownerInfo.username || ownerInfo.email : `Owner ${ownerIdNum}`,
+      owner_email: ownerInfo?.email || '',
+      avg_rating: reviewData.count ? reviewData.total / reviewData.count : 0,
+      review_count: reviewData.count,
+      product_count: productCount
+    };
+  });
+
+    // เรียงตาม avg_rating จากมากไปน้อย
+    reputations.sort((a, b) => b.avg_rating - a.avg_rating);
+
+    return { reputations };
+  } catch (error) {
+    console.error('Error in getUserReputationReport:', error);
+    throw error;
+  }
 }
 
 // Product/Category Management
@@ -225,15 +367,31 @@ async function getAllProducts(query = {}) {
     }
   };
 }
-async function approveProduct(id, body) {
+async function approveProduct(id, body, adminUserId = null, req = null) {
   // อัปเดตสถานะอนุมัติสินค้า
+  const updateData = {
+    ...body,
+    // Set published_at when product is approved
+    ...(body.admin_approval_status === 'approved' && { published_at: new Date().toISOString() })
+  };
+  
   const { data, error } = await supabase
     .from('products')
-    .update(body)
+    .update(updateData)
     .eq('id', Number(id))
     .select('*')
     .single();
   if (error) throw error;
+  
+  // Log admin action
+  if (adminUserId) {
+    await AdminLogger.logProductAction(adminUserId, 'PRODUCT_APPROVE', Number(id), {
+      action: `Product ${body.admin_approval_status}`,
+      updated_fields: Object.keys(updateData),
+      new_values: updateData
+    }, req);
+  }
+  
   return data;
 }
 async function getAllCategories(query = {}) {
@@ -244,16 +402,25 @@ async function getAllCategories(query = {}) {
   if (error) throw error;
   return { data: data || [] };
 }
-async function createCategory(body) {
+async function createCategory(body, adminUserId = null, req = null) {
   const { data, error } = await supabase
     .from('categories')
     .insert([body])
     .select('*')
     .single();
   if (error) throw error;
+  
+  // Log admin action
+  if (adminUserId) {
+    await AdminLogger.logCategoryAction(adminUserId, 'CATEGORY_CREATE', data.id, {
+      category_name: data.name,
+      category_data: body
+    }, req);
+  }
+  
   return data;
 }
-async function updateCategory(id, body) {
+async function updateCategory(id, body, adminUserId = null, req = null) {
   const { data, error } = await supabase
     .from('categories')
     .update(body)
@@ -261,9 +428,18 @@ async function updateCategory(id, body) {
     .select('*')
     .single();
   if (error) throw error;
+  
+  // Log admin action
+  if (adminUserId) {
+    await AdminLogger.logCategoryAction(adminUserId, 'CATEGORY_UPDATE', Number(id), {
+      updated_fields: Object.keys(body),
+      new_values: body
+    }, req);
+  }
+  
   return data;
 }
-async function deleteCategory(id) {
+async function deleteCategory(id, adminUserId = null, req = null) {
   const { data, error } = await supabase
     .from('categories')
     .delete()
@@ -271,6 +447,15 @@ async function deleteCategory(id) {
     .select('*')
     .single();
   if (error) throw error;
+  
+  // Log admin action
+  if (adminUserId) {
+    await AdminLogger.logCategoryAction(adminUserId, 'CATEGORY_DELETE', Number(id), {
+      category_name: data.name,
+      action: 'Category deleted'
+    }, req);
+  }
+  
   return data;
 }
 
@@ -280,30 +465,29 @@ async function getSettings() {
   if (error) throw error;
   return { settings: data || [] };
 }
-async function updateSettings(body) {
-  // body: { setting_key, setting_value, ... }
+async function updateSettings(body, adminUserId = null, req = null) {
+  // body: { setting_key, setting_value, updated_by_admin_id, ... }
   const { data, error } = await supabase
     .from('system_settings')
-    .upsert([body])
+    .upsert([{
+      ...body,
+      updated_at: new Date().toISOString()
+    }])
     .select('*');
   if (error) throw error;
+  
+  // Log admin action
+  if (adminUserId) {
+    await AdminLogger.logSettingAction(adminUserId, 'SETTING_UPDATE', body.setting_key, {
+      setting_key: body.setting_key,
+      setting_value: body.setting_value,
+      updated_fields: Object.keys(body)
+    }, req);
+  }
+  
   return { updated: true, data };
 }
-async function getStaticPages() {
-  const { data, error } = await supabase.from('static_pages').select('*');
-  if (error) throw error;
-  return { data: data || [] };
-}
-async function updateStaticPage(slug, body) {
-  const { data, error } = await supabase
-    .from('static_pages')
-    .update(body)
-    .eq('slug', slug)
-    .select('*')
-    .single();
-  if (error) throw error;
-  return data;
-}
+
 
 async function getProductReport(query = {}) {
   // รับ filter
@@ -416,12 +600,58 @@ async function getProductReport(query = {}) {
   };
 }
 
+// Admin Logs Management
+async function getAdminLogs(query = {}) {
+  const { page = 1, limit = 20, admin_user_id, action_type, target_entity_type, start_date, end_date } = query;
+  const offset = (page - 1) * limit;
+  
+  let queryBuilder = supabase
+    .from('admin_logs')
+    .select(`
+      *,
+      admin_user:admin_user_id(id, username, email, first_name, last_name)
+    `, { count: 'exact' })
+    .order('created_at', { ascending: false });
+  
+  // Apply filters
+  if (admin_user_id) {
+    queryBuilder = queryBuilder.eq('admin_user_id', Number(admin_user_id));
+  }
+  if (action_type) {
+    queryBuilder = queryBuilder.eq('action_type', action_type);
+  }
+  if (target_entity_type) {
+    queryBuilder = queryBuilder.eq('target_entity_type', target_entity_type);
+  }
+  if (start_date) {
+    queryBuilder = queryBuilder.gte('created_at', start_date);
+  }
+  if (end_date) {
+    queryBuilder = queryBuilder.lte('created_at', end_date);
+  }
+  
+  const { data, error, count } = await queryBuilder.range(offset, offset + limit - 1);
+  if (error) throw error;
+  
+  return {
+    data: data || [],
+    meta: {
+      current_page: page,
+      per_page: limit,
+      total: count || 0,
+      last_page: Math.ceil((count || 0) / limit),
+      from: count > 0 ? offset + 1 : 0,
+      to: count > 0 ? Math.min(count, offset + limit) : 0
+    }
+  };
+}
+
 export default {
   login,
   getAllUsers, getUserById, updateUser, banUser, unbanUser, deleteUser, updateUserIdVerification,
   getAllComplaints, getComplaintById, replyComplaint,
   getRentalReport, getIncomeReport, getPlatformStats, getComplaintReport, getUserReputationReport,
   getAllProducts, approveProduct, getAllCategories, createCategory, updateCategory, deleteCategory,
-  getSettings, updateSettings, getStaticPages, updateStaticPage,
-  getProductReport
+  getSettings, updateSettings,
+  getProductReport, getAdminLogs
 }; 

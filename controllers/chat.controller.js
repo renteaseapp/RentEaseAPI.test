@@ -47,7 +47,14 @@ const ChatController = {
         const FileService = (await import('../services/file.service.js')).default;
         const storageConfig = (await import('../config/storage.config.js')).default;
         const ext = file.originalname.split('.').pop();
-        const filePath = `public/${userId}/${Date.now()}_${file.originalname}`;
+        
+        // Sanitize filename to remove invalid characters for Supabase storage
+        const sanitizedOriginalName = file.originalname
+            .replace(/[^a-zA-Z0-9.-]/g, '_') // Replace non-alphanumeric chars with underscore
+            .replace(/_{2,}/g, '_') // Replace multiple underscores with single
+            .replace(/^_|_$/g, ''); // Remove leading/trailing underscores
+        
+        const filePath = `public/${userId}/${Date.now()}_${sanitizedOriginalName}`;
         const uploadResult = await FileService.uploadFileToSupabaseStorage(
             file,
             storageConfig.chatFilesBucketName,

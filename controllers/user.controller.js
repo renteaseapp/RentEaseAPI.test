@@ -57,6 +57,7 @@ const UserController = {
     addProductToWishlist: asyncHandler(async (req, res) => {
         const userId = req.user.id;
         const { productId } = req.body;
+        console.log('🔍 addProductToWishlist - userId:', userId, 'productId:', productId);
         if (!productId) {
             throw new ApiError(httpStatusCodes.BAD_REQUEST, "productId is required in the body.");
         }
@@ -69,6 +70,7 @@ const UserController = {
     removeProductFromWishlist: asyncHandler(async (req, res) => {
         const userId = req.user.id;
         const { productId } = req.params;
+        console.log('🔍 removeProductFromWishlist - userId:', userId, 'productId:', productId);
         const result = await UserService.removeProductFromWishlist(userId, productId);
         res.status(httpStatusCodes.OK).json(
             new ApiResponse(httpStatusCodes.OK, result, result.message)
@@ -86,9 +88,19 @@ const UserController = {
 
     getMyWishlist: asyncHandler(async (req, res) => {
         const userId = req.user.id;
+        console.log('🔍 getMyWishlist - userId:', userId, 'query:', req.query);
         const result = await UserService.getMyWishlist(userId, req.query);
         res.status(httpStatusCodes.OK).json(
             new ApiResponse(httpStatusCodes.OK, result)
+        );
+    }),
+
+    // Public Profile API - Get public user information
+    getPublicProfile: asyncHandler(async (req, res) => {
+        const { userId } = req.params;
+        const publicProfile = await UserService.getPublicUserProfile(userId);
+        res.status(httpStatusCodes.OK).json(
+            new ApiResponse(httpStatusCodes.OK, { user: publicProfile })
         );
     })
 };

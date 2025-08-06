@@ -3,6 +3,8 @@ import RentalController from '../controllers/rental.controller.js';
 import authenticateJWT from '../middleware/authenticateJWT.js';
 import validateRequest from '../middleware/validateRequest.js';
 import { uploadSingleFile, uploadMultipleFields } from '../middleware/fileUpload.js';
+import { rollbackQuantityOnError } from '../middleware/quantityValidation.middleware.js';
+import parseReturnDetails from '../middleware/parseReturnDetails.js';
 import {
     createRentalSchema,
     rejectRentalSchema,
@@ -21,7 +23,8 @@ router.use(authenticateJWT);
 router.post(
     '/', // POST to /api/rentals to create a new rental request
     validateRequest(createRentalSchema, 'body'),
-    RentalController.createRentalRequest
+    RentalController.createRentalRequest,
+    rollbackQuantityOnError // คืน quantity ถ้าเกิดข้อผิดพลาด
 );
 
 // Get specific rental details (for owner or renter)
@@ -75,6 +78,7 @@ router.put(
 router.post(
     '/:rental_id_or_uid/initiate-return',
     uploadSingleFile('shipping_receipt_image'), // Optional field for shipping receipt
+    parseReturnDetails, // Parse FormData bracket notation to nested objects
     validateRequest(initiateReturnSchema, 'body'),
     RentalController.initiateReturnHandler
 );

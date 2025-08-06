@@ -118,6 +118,7 @@ const UserService = {
 
     // Wishlist Methods
     async addProductToWishlist(userId, productId) {
+        console.log('🔍 addProductToWishlist called with:', { userId, productId });
         try {
             // Check if product exists and is approved
             const { data: product, error: productError } = await supabase
@@ -149,6 +150,7 @@ const UserService = {
             }
 
             // Add to wishlist
+            console.log('🔍 Inserting into wishlist:', { user_id: userId, product_id: productId });
             const { error: insertError } = await supabase
                 .from('wishlist')
                 .insert([
@@ -159,8 +161,10 @@ const UserService = {
                 ]);
 
             if (insertError) {
+                console.error('❌ Insert error:', insertError);
                 throw new ApiError(httpStatusCodes.INTERNAL_SERVER_ERROR, 'Error adding to wishlist');
             }
+            console.log('✅ Successfully added to wishlist');
 
             return { success: true, message: 'Product added to wishlist' };
         } catch (error) {
@@ -172,7 +176,9 @@ const UserService = {
     },
 
     async removeProductFromWishlist(userId, productId) {
+        console.log('🔍 removeProductFromWishlist called with:', { userId, productId });
         try {
+            console.log('🔍 Deleting from wishlist:', { user_id: userId, product_id: productId });
             const { error } = await supabase
                 .from('wishlist')
                 .delete()
@@ -180,8 +186,10 @@ const UserService = {
                 .eq('product_id', productId);
 
             if (error) {
+                console.error('❌ Delete error:', error);
                 throw new ApiError(httpStatusCodes.INTERNAL_SERVER_ERROR, 'Error removing from wishlist');
             }
+            console.log('✅ Successfully removed from wishlist');
 
             return { success: true, message: 'Product removed from wishlist' };
         } catch (error) {
@@ -214,57 +222,107 @@ const UserService = {
         }
     },
 
-    async getMyWishlist(userId, { page = 1, limit = 10 } = {}) {
-        try {
-            const offset = (page - 1) * limit;
+    async getMyWishlist(userId, queryParams) {
+        console.log('🔍 getMyWishlist called with:', { userId, queryParams });
+        const { page = 1, limit = 10 } = queryParams;
+        const offset = (page - 1) * limit;
 
-            const { data, error, count } = await supabase
-                .from('wishlist')
-                .select(`
-                    product:products!fk_wishlist_product (
+        console.log('🔍 Querying wishlist with:', { userId, offset, limit });
+
+        const { data: wishlistItems, error: wishlistError } = await supabase
+            .from('wishlist')
+            .select(`
+                product_id,
+                added_at,
+                products (
+                    id,
+                    title,
+                    description,
+                    rental_price_per_day,
+                    rental_price_per_week,
+                    rental_price_per_month,
+                    category_id,
+                    owner_id,
+                    availability_status,
+                    created_at,
+                    product_images (
                         id,
-                        title,
-                        slug,
-                        rental_price_per_day,
-                        average_rating,
-                        total_reviews,
-                        view_count,
-                        province:provinces (id, name_th),
-                        category:categories (id, name),
-                        primary_image:product_images (image_url)
+                        image_url,
+                        is_primary
                     )
-                `, { count: 'exact' })
-                .eq('user_id', userId)
-                .eq('product.admin_approval_status', 'approved')
-                .is('product.deleted_at', null)
-                .eq('product.primary_image.is_primary', true)
-                .order('added_at', { ascending: false })
-                .range(offset, offset + limit - 1);
+                )
+            `)
+            .eq('user_id', userId)
+            .order('added_at', { ascending: false })
+            .range(offset, offset + limit - 1);
 
-            if (error) {
-                throw new ApiError(httpStatusCodes.INTERNAL_SERVER_ERROR, 'Error fetching wishlist');
-            }
+        console.log('🔍 Wishlist query result:', { wishlistItems, wishlistError });
 
-            const products = data.map(item => ({
-                ...item.product,
-                primary_image: item.product.primary_image && item.product.primary_image.length > 0 
-                    ? item.product.primary_image[0] 
-                    : { image_url: null }
-            }));
-
-            return {
-                products,
-                total: count,
-                page,
-                limit,
-                totalPages: Math.ceil(count / limit)
-            };
-        } catch (error) {
-            if (error instanceof ApiError) {
-                throw error;
-            }
-            throw new ApiError(httpStatusCodes.INTERNAL_SERVER_ERROR, 'Error fetching wishlist');
+        if (wishlistError) {
+            console.error("❌ Error fetching wishlist:", wishlistError);
+            console.error("❌ Error details:", {
+                code: wishlistError.code,
+                message: wishlistError.message,
+                details: wishlistError.details,
+                hint: wishlistError.hint
+            });
+            throw new ApiError(httpStatusCodes.INTERNAL_SERVER_ERROR, `Failed to fetch wishlist: ${wishlistError.message}`);
         }
+
+        const { count, error: countError } = await supabase
+            .from('wishlist')
+            .select('*', { count: 'exact', head: true })
+            .eq('user_id', userId);
+
+        if (countError) {
+            console.error("Error counting wishlist items:", countError);
+            throw new ApiError(httpStatusCodes.INTERNAL_SERVER_ERROR, "Failed to count wishlist items.");
+        }
+
+        return {
+            items: wishlistItems || [],
+            pagination: {
+                page: parseInt(page),
+                limit: parseInt(limit),
+                total: count || 0,
+                totalPages: Math.ceil((count || 0) / limit)
+            }
+        };
+    },
+
+    // Get public user profile information
+    async getPublicUserProfile(userId) {
+        const { data: user, error } = await supabase
+            .from('users')
+            .select(`
+                id,
+                username,
+                email,
+                first_name,
+                last_name,
+                phone_number,
+                profile_picture_url,
+                address_line1,
+                address_line2,
+                city,
+                province_id,
+                postal_code,
+                id_verification_status,
+                created_at
+            `)
+            .eq('id', userId)
+            .eq('is_active', true)
+            .single();
+
+        if (error) {
+            if (error.code === 'PGRST116') {
+                throw new ApiError(httpStatusCodes.NOT_FOUND, "User not found.");
+            }
+            console.error("Error fetching public user profile:", error);
+            throw new ApiError(httpStatusCodes.INTERNAL_SERVER_ERROR, "Failed to fetch user profile.");
+        }
+
+        return user;
     }
 };
 
