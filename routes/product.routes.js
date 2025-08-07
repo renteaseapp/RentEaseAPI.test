@@ -3,7 +3,8 @@ import ProductController from '../controllers/product.controller.js';
 import ReviewController from '../controllers/review.controller.js';
 import authenticateJWT from '../middleware/authenticateJWT.js';
 import validateRequest from '../middleware/validateRequest.js';
-import { getProductsQuerySchema, getProductReviewsQuerySchema } from '../DTOs/product.dto.js';
+import { uploadMultipleFields } from '../middleware/fileUpload.js';
+import { getProductsQuerySchema, getProductReviewsQuerySchema, createProductSchema } from '../DTOs/product.dto.js';
 
 const router = express.Router();
 
@@ -18,6 +19,14 @@ router.get('/:productId/availability/:yearMonth', ProductController.getProductAv
 
 // Product reviews (public)
 router.get('/:productId/reviews', validateRequest(getProductReviewsQuerySchema, 'query'), ReviewController.getProductReviews);
+
+// Owner routes (protected)
+router.post('/', 
+    authenticateJWT, 
+    uploadMultipleFields([{ name: 'images[]', maxCount: 10 }]),
+    validateRequest(createProductSchema, 'body'), 
+    ProductController.createProduct
+);
 
 // Admin/Maintenance routes (protected)
 router.post('/sync-quantities', authenticateJWT, ProductController.syncProductQuantities);
