@@ -4,6 +4,7 @@ import ReviewController from '../controllers/review.controller.js';
 import authenticateJWT from '../middleware/authenticateJWT.js';
 import validateRequest from '../middleware/validateRequest.js';
 import { uploadMultipleFields } from '../middleware/fileUpload.js';
+import parseSpecifications from '../middleware/parseSpecifications.js';
 import { getProductsQuerySchema, getProductReviewsQuerySchema, createProductSchema } from '../DTOs/product.dto.js';
 
 const router = express.Router();
@@ -24,6 +25,7 @@ router.get('/:productId/reviews', validateRequest(getProductReviewsQuerySchema, 
 router.post('/', 
     authenticateJWT, 
     uploadMultipleFields([{ name: 'images[]', maxCount: 10 }]),
+    parseSpecifications, // Parse specifications before validation
     validateRequest(createProductSchema, 'body'), 
     ProductController.createProduct
 );
