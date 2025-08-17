@@ -13,6 +13,9 @@ const router = express.Router();
 
 router.post('/register', validateRequest(registerSchema), UserController.register);
 
+// Public routes (no authentication required)
+router.get('/:userId/public-profile', UserController.getPublicProfile);
+
 // Protected routes below
 router.get('/me', authenticateJWT, UserController.getMe);
 router.put('/me/profile', authenticateJWT, validateRequest(updateProfileSchema), UserController.updateProfile);

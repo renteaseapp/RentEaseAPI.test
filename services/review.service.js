@@ -5,6 +5,15 @@ import httpStatusCodes from '../constants/httpStatusCodes.js';
 import NotificationService from './notification.service.js';
 import supabase from '../db/supabaseClient.js';
 
+// Import realtime event emitters
+import { 
+    emitReviewCreated, 
+    emitReviewUpdate, 
+    emitReviewDeleted,
+    emitProductUpdate,
+    emitNotificationToUser
+} from '../server.js';
+
 const ReviewService = {
     // อัปเดต average_rating และ total_reviews ในตาราง products
     async updateProductRatingStats(productId) {
@@ -97,6 +106,20 @@ const ReviewService = {
         // อัปเดต average_rating และ total_reviews ในตาราง products
         await this.updateProductRatingStats(rental.product_id);
 
+        // Emit realtime events
+        emitReviewCreated(review);
+        
+        // Emit product update for rating changes
+        const updatedProduct = await supabase
+            .from('products')
+            .select('*')
+            .eq('id', rental.product_id)
+            .single();
+        
+        if (updatedProduct.data) {
+            emitProductUpdate(rental.product_id, updatedProduct.data);
+        }
+
         // Send notification to owner
         await NotificationService.createNotification({
             user_id: rental.owner_id,
@@ -108,6 +131,7 @@ const ReviewService = {
             related_entity_id: review.id,
             related_entity_uid: null
         });
+        
         return review;
     },
 
@@ -139,6 +163,20 @@ const ReviewService = {
         // อัปเดต average_rating และ total_reviews ในตาราง products
         await this.updateProductRatingStats(review.rentals.product_id);
 
+        // Emit realtime events
+        emitReviewUpdate(updated.id, updated);
+        
+        // Emit product update for rating changes
+        const updatedProduct = await supabase
+            .from('products')
+            .select('*')
+            .eq('id', review.rentals.product_id)
+            .single();
+        
+        if (updatedProduct.data) {
+            emitProductUpdate(review.rentals.product_id, updatedProduct.data);
+        }
+
         // Send notification to owner
         await NotificationService.createNotification({
             user_id: review.rentals.owner_id,
@@ -150,6 +188,7 @@ const ReviewService = {
             related_entity_id: review.id,
             related_entity_uid: null
         });
+        
         return updated;
     },
 
@@ -164,6 +203,20 @@ const ReviewService = {
         // อัปเดต average_rating และ total_reviews ในตาราง products
         await this.updateProductRatingStats(productId);
 
+        // Emit realtime events
+        emitReviewDeleted(review.id);
+        
+        // Emit product update for rating changes
+        const updatedProduct = await supabase
+            .from('products')
+            .select('*')
+            .eq('id', productId)
+            .single();
+        
+        if (updatedProduct.data) {
+            emitProductUpdate(productId, updatedProduct.data);
+        }
+
         // Send notification to owner
         await NotificationService.createNotification({
             user_id: review.rentals.owner_id,
@@ -175,6 +228,7 @@ const ReviewService = {
             related_entity_id: review.id,
             related_entity_uid: null
         });
+        
         return result;
     },
 

@@ -1,0 +1,37 @@
+{
+  "name": "rentease-setup",
+  "version": "1.0.0",
+  "description": "Setup script for RentEase Supabase project",
+  "main": "setup.js",
+  "scripts": {
+    "setup": "node setup.js",
+    "setup:db": "node -e \"require('./setup.js').runSetup()\"",
+    "create-buckets": "node create_buckets.js",
+    "test": "node -e \"console.log('Setup test completed')\""
+  },
+  "keywords": [
+    "supabase",
+    "setup",
+    "database",
+    "storage",
+    "rentease"
+  ],
+  "author": "RentEase Team",
+  "license": "MIT",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-org/rentease.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-org/rentease/issues"
+  },
+  "homepage": "https://github.com/your-org/rentease#readme"
+} 

@@ -76,10 +76,9 @@ export const initiateReturnSchema = Joi.object({
         {
             is: 'in_person',
             then: Joi.object({
-                location: Joi.string(),
-                return_location: Joi.string(),
+                location: Joi.string().optional().allow(null, ''),
                 return_datetime: Joi.date().iso().required(),
-            }).or('location', 'return_location').required()
+            }).required()
         },
         {
             is: 'shipping',
@@ -92,3 +91,9 @@ export const initiateReturnSchema = Joi.object({
     ]),
     notes: Joi.string().trim().max(1000).optional().allow(null, ''),
 }); 
+
+export const deliveryStatusUpdateSchema = Joi.object({
+    delivery_status: Joi.string().valid('pending', 'shipped', 'delivered', 'failed', 'returned').required(),
+    tracking_number: Joi.string().optional().allow(null, ''),
+    carrier_code: Joi.string().optional().allow(null, '')
+});

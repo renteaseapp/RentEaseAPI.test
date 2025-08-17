@@ -362,7 +362,36 @@ const ProductModel = {
             .sort((a, b) => b[1] - a[1])
             .slice(0, limit)
             .map(([productId]) => parseInt(productId, 10));
-        if (topProductIds.length === 0) return [];
+        
+        // ถ้าไม่มีสินค้าที่เช่าแล้ว ให้ fallback เป็นสินค้าล่าสุด
+        if (topProductIds.length === 0) {
+            const { data: fallbackProducts, error: fallbackError } = await supabase
+                .from('products')
+                .select(`
+                    id, title, slug, rental_price_per_day, average_rating, total_reviews, view_count,
+                    province:provinces (id, name_th),
+                    category:categories (id, name),
+                    primary_image:product_images (image_url)
+                `)
+                .eq('admin_approval_status', 'approved')
+                .eq('availability_status', 'available')
+                .is('deleted_at', null)
+                .eq('primary_image.is_primary', true)
+                .order('created_at', { ascending: false })
+                .limit(limit);
+            
+            if (fallbackError) {
+                console.error('Error fetching fallback products:', fallbackError);
+                return [];
+            }
+            
+            return (fallbackProducts || []).map(p => ({
+                ...p,
+                primary_image: p.primary_image && p.primary_image.length > 0 ? p.primary_image[0] : { image_url: null },
+                category: p.category || null,
+                rental_count: 0
+            }));
+        }
         // 4. ดึงข้อมูลสินค้า
         const { data: products, error: productError } = await supabase
             .from('products')
@@ -392,6 +421,208 @@ const ProductModel = {
         });
         // 6. คืน array ตามลำดับยอดเช่า
         return topProductIds.map(id => productMap[id]).filter(Boolean);
+    },
+
+    // อัปเดตจำนวนสินค้าที่พร้อมให้เช่า และจัดการ availability_status อัตโนมัติ
+    async updateQuantityAvailable(productId, quantityChange) {
+        try {
+            // ดึงข้อมูลสินค้าปัจจุบัน
+            const { data: currentProduct, error: fetchError } = await supabase
+                .from('products')
+                .select('quantity, quantity_available, availability_status')
+                .eq('id', productId)
+                .single();
+
+            if (fetchError) {
+                console.error('Error fetching product for quantity update:', fetchError);
+                throw fetchError;
+            }
+
+            if (!currentProduct) {
+                throw new ApiError(httpStatusCodes.NOT_FOUND, "Product not found for quantity update.");
+            }
+
+            // คำนวณ quantity_available ใหม่
+            const newQuantityAvailable = Math.max(0, currentProduct.quantity_available + quantityChange);
+            
+            // ป้องกันไม่ให้ quantity_available เกิน quantity
+            const finalQuantityAvailable = Math.min(newQuantityAvailable, currentProduct.quantity);
+
+            // กำหนด availability_status ใหม่ตาม business logic
+            let newAvailabilityStatus = currentProduct.availability_status;
+            
+            // ถ้าสินค้าหมด (quantity_available = 0) และเดิมเป็น available
+            if (finalQuantityAvailable === 0 && currentProduct.availability_status === 'available') {
+                newAvailabilityStatus = 'rented_out';
+            }
+            // ถ้าสินค้ากลับมามี (quantity_available > 0) และเดิมเป็น rented_out
+            else if (finalQuantityAvailable > 0 && currentProduct.availability_status === 'rented_out') {
+                newAvailabilityStatus = 'available';
+            }
+
+            // อัปเดตฐานข้อมูล
+            const { data: updatedProduct, error: updateError } = await supabase
+                .from('products')
+                .update({
+                    quantity_available: finalQuantityAvailable,
+                    availability_status: newAvailabilityStatus,
+                    updated_at: new Date().toISOString()
+                })
+                .eq('id', productId)
+                .select('id, quantity, quantity_available, availability_status')
+                .single();
+
+            if (updateError) {
+                console.error('Error updating product quantity:', updateError);
+                throw updateError;
+            }
+
+            console.log(`Product ${productId} quantity updated: ${currentProduct.quantity_available} → ${finalQuantityAvailable}, status: ${currentProduct.availability_status} → ${newAvailabilityStatus}`);
+            
+            return updatedProduct;
+
+        } catch (error) {
+            console.error('Error in updateQuantityAvailable:', error);
+            throw error;
+        }
+    },
+
+    // ตรวจสอบความพร้อมของสินค้าก่อนการเช่า (Race Condition Protection)
+    async checkAndReserveQuantity(productId, requestedQuantity = 1) {
+        try {
+            // ใช้ transaction เพื่อป้องกัน race condition
+            const { data: product, error: fetchError } = await supabase
+                .from('products')
+                .select('id, quantity, quantity_available, availability_status, title')
+                .eq('id', productId)
+                .eq('admin_approval_status', 'approved')
+                .is('deleted_at', null)
+                .single();
+
+            if (fetchError) {
+                console.error('Error fetching product for reservation:', fetchError);
+                throw fetchError;
+            }
+
+            if (!product) {
+                throw new ApiError(httpStatusCodes.NOT_FOUND, "Product not found or not approved.");
+            }
+
+            // ตรวจสอบสถานะสินค้า - อนุญาตให้เช่าได้ถ้าเป็น available หรือ rented_out แต่มี quantity_available เพียงพอ
+            if (product.availability_status !== 'available' && product.availability_status !== 'rented_out') {
+                throw new ApiError(httpStatusCodes.BAD_REQUEST, 
+                    `Product "${product.title}" is currently not available for rental. Status: ${product.availability_status}`);
+            }
+
+            // ตรวจสอบจำนวนที่พร้อมให้เช่า
+            if (product.quantity_available < requestedQuantity) {
+                throw new ApiError(httpStatusCodes.BAD_REQUEST, 
+                    `Product "${product.title}" is currently out of stock. Available: ${product.quantity_available}, Requested: ${requestedQuantity}`);
+            }
+
+            // ถ้าผ่านการตรวจสอบทั้งหมด ให้จอง quantity ไว้ชั่วคราว
+            // (ในระบบจริงอาจใช้ Redis หรือ database lock)
+            await this.updateQuantityAvailable(productId, -requestedQuantity);
+
+            return {
+                success: true,
+                product: product,
+                reserved_quantity: requestedQuantity
+            };
+
+        } catch (error) {
+            console.error('Error in checkAndReserveQuantity:', error);
+            throw error;
+        }
+    },
+
+    // คืน quantity เมื่อการเช่าถูกยกเลิกหรือล้มเหลว (Rollback)
+    async releaseReservedQuantity(productId, quantityToRelease = 1, reason = 'rental_cancelled') {
+        try {
+            console.log(`Releasing ${quantityToRelease} units for product ${productId}. Reason: ${reason}`);
+            
+            const updatedProduct = await this.updateQuantityAvailable(productId, quantityToRelease);
+            
+            return {
+                success: true,
+                product: updatedProduct,
+                released_quantity: quantityToRelease,
+                reason: reason
+            };
+
+        } catch (error) {
+            console.error('Error in releaseReservedQuantity:', error);
+            throw error;
+        }
+    },
+
+    // ตรวจสอบและซิงค์ quantity_available กับการเช่าจริง (Maintenance function)
+    async syncProductQuantities(productId = null) {
+        try {
+            let query = supabase
+                .from('products')
+                .select('id, quantity, quantity_available, title');
+
+            if (productId) {
+                query = query.eq('id', productId);
+            } else {
+                // ซิงค์เฉพาะสินค้าที่ active
+                query = query.in('availability_status', ['available', 'rented_out'])
+                           .is('deleted_at', null);
+            }
+
+            const { data: products, error: fetchError } = await query;
+
+            if (fetchError) {
+                console.error('Error fetching products for sync:', fetchError);
+                throw fetchError;
+            }
+
+            const syncResults = [];
+
+            for (const product of products) {
+                // นับจำนวนการเช่าที่ active
+                const { data: activeRentals, error: rentalError } = await supabase
+                    .from('rentals')
+                    .select('id')
+                    .eq('product_id', product.id)
+                    .in('rental_status', ['confirmed', 'active']);
+
+                if (rentalError) {
+                    console.error(`Error fetching rentals for product ${product.id}:`, rentalError);
+                    continue;
+                }
+
+                const activeRentalCount = activeRentals?.length || 0;
+                const correctQuantityAvailable = Math.max(0, product.quantity - activeRentalCount);
+
+                // ถ้า quantity_available ไม่ตรงกับที่คำนวณได้
+                if (product.quantity_available !== correctQuantityAvailable) {
+                    console.log(`Syncing product ${product.id}: ${product.quantity_available} → ${correctQuantityAvailable}`);
+                    
+                    const quantityDiff = correctQuantityAvailable - product.quantity_available;
+                    await this.updateQuantityAvailable(product.id, quantityDiff);
+                    
+                    syncResults.push({
+                        product_id: product.id,
+                        title: product.title,
+                        old_quantity_available: product.quantity_available,
+                        new_quantity_available: correctQuantityAvailable,
+                        active_rentals: activeRentalCount
+                    });
+                }
+            }
+
+            return {
+                success: true,
+                synced_products: syncResults.length,
+                details: syncResults
+            };
+
+        } catch (error) {
+            console.error('Error in syncProductQuantities:', error);
+            throw error;
+        }
     }
 };
 

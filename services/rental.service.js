@@ -9,20 +9,66 @@ import { ApiError } from '../utils/apiError.js';
 import httpStatusCodes from '../constants/httpStatusCodes.js';
 import NotificationService from './notification.service.js';
 import supabase from '../db/supabaseClient.js';
+import { getCurrentDateISO, formatDate, startOfDay, endOfDay } from '../utils/timezoneUtils.js';
+
+// Import realtime event emitters
+import { 
+    emitRentalCreated, 
+    emitRentalUpdate, 
+    emitProductUpdate,
+    emitQuantityUpdate,
+    emitNotificationToUser,
+    emitNotificationToRole
+} from '../server.js';
 
 const RentalService = {
+    /**
+     * คำนวณค่าปรับล่าช้าสำหรับการเช่า
+     * @param {Object} rental - ข้อมูลการเช่า
+     * @param {Date} actualReturnTime - เวลาคืนจริง
+     * @returns {number} - จำนวนค่าปรับ
+     */
+    async calculateLateFee(rental, actualReturnTime) {
+        const endDate = new Date(rental.end_date);
+        const returnTime = new Date(actualReturnTime);
+        
+        // ถ้าคืนก่อนหรือตรงเวลา ไม่มีค่าปรับ
+        if (returnTime <= endDate) {
+            return 0;
+        }
+        
+        // คำนวณจำนวนวันที่ล่าช้า
+        const timeDiff = returnTime.getTime() - endDate.getTime();
+        const daysLate = Math.ceil(timeDiff / (1000 * 3600 * 24));
+        
+        if (daysLate <= 0) {
+            return 0;
+        }
+        
+        // ดึงค่า late fee per day จาก system settings
+        const lateFeeSetting = await SystemSettingModel.getSetting('late_fee_per_day', '0');
+        const lateFeePerDay = parseFloat(lateFeeSetting.setting_value) || 0;
+        
+        // คำนวณค่าปรับรวม
+        const totalLateFee = daysLate * lateFeePerDay;
+        
+        return totalLateFee;
+    },
+
     async createRentalRequest(renterId, rentalRequestData) {
         const { product_id, start_date, end_date, pickup_method, delivery_address_id, notes_from_renter } = rentalRequestData;
 
         const product = await ProductModel.findByIdOrSlug(product_id); // Uses forUpdate = false by default
-        if (!product || product.availability_status !== 'available' || product.admin_approval_status !== 'approved') {
+        if (!product || (product.availability_status !== 'available' && product.availability_status !== 'rented_out') || product.admin_approval_status !== 'approved') {
             throw new ApiError(httpStatusCodes.BAD_REQUEST, "Product not available or not found.");
         }
         if (product.owner_id === renterId) {
             throw new ApiError(httpStatusCodes.BAD_REQUEST, "You cannot rent your own product.");
         }
-        if (product.quantity_available < 1 && product.quantity > 0) { // Check if quantity > 0 for products that track it
-            throw new ApiError(httpStatusCodes.BAD_REQUEST, "Product is currently out of stock for rental.");
+
+        // ตรวจสอบว่าสินค้ามีจำนวนเพียงพอสำหรับการเช่า (ไม่จองไว้ตอนนี้)
+        if (product.quantity_available < 1) {
+            throw new ApiError(httpStatusCodes.BAD_REQUEST, "Product is currently out of stock.");
         }
 
         const startDateObj = new Date(start_date);
@@ -51,11 +97,11 @@ const RentalService = {
         const subtotalRentalFee = product.rental_price_per_day * rentalDurationDays;
         let deliveryFee = 0;
         if (pickup_method === 'delivery') {
-            const defaultDeliveryFeeSetting = await SystemSettingModel.getSetting('default_delivery_fee', '0');
-            deliveryFee = parseFloat(defaultDeliveryFeeSetting.setting_value) || 0;
+            const deliveryFeeBaseSetting = await SystemSettingModel.getSetting('delivery_fee_base', '0');
+            deliveryFee = parseFloat(deliveryFeeBaseSetting.setting_value) || 0;
         }
         let platformFeeRenter = 0;
-        const platformFeeRenterPercentSetting = await SystemSettingModel.getSetting('platform_fee_renter_percentage', '0');
+        const platformFeeRenterPercentSetting = await SystemSettingModel.getSetting('platform_fee_percentage', '0');
         const platformFeeRenterPercent = parseFloat(platformFeeRenterPercentSetting.setting_value) / 100 || 0;
         if (platformFeeRenterPercent > 0) {
             platformFeeRenter = subtotalRentalFee * platformFeeRenterPercent;
@@ -67,7 +113,30 @@ const RentalService = {
             platformFeeOwner = subtotalRentalFee * platformFeeOwnerPercent;
         }
         const securityDeposit = product.security_deposit || 0;
+        
+        // ตรวจสอบความถูกต้องของการคำนวณ
+        if (subtotalRentalFee < 0) {
+            throw new ApiError(httpStatusCodes.BAD_REQUEST, "Invalid rental fee calculation.");
+        }
+        if (deliveryFee < 0) {
+            throw new ApiError(httpStatusCodes.BAD_REQUEST, "Invalid delivery fee calculation.");
+        }
+        if (platformFeeRenter < 0) {
+            throw new ApiError(httpStatusCodes.BAD_REQUEST, "Invalid platform fee calculation for renter.");
+        }
+        if (platformFeeOwner < 0) {
+            throw new ApiError(httpStatusCodes.BAD_REQUEST, "Invalid platform fee calculation for owner.");
+        }
+        if (securityDeposit < 0) {
+            throw new ApiError(httpStatusCodes.BAD_REQUEST, "Invalid security deposit amount.");
+        }
+        
         const totalAmountDue = subtotalRentalFee + securityDeposit + deliveryFee + platformFeeRenter;
+        
+        // ตรวจสอบยอดรวมสุดท้าย
+        if (totalAmountDue < 0) {
+            throw new ApiError(httpStatusCodes.BAD_REQUEST, "Invalid total amount calculation.");
+        }
         
         // const requiresOwnerApproval = product.settings?.requires_approval ?? true; // Example if product has such setting
         const requiresOwnerApproval = true; // Default for now
@@ -87,6 +156,17 @@ const RentalService = {
             return_condition_status: 'not_yet_returned',
         };
         const rental = await RentalModel.create(rentalPayload);
+        
+        // Emit realtime events
+        emitRentalCreated(rental);
+        
+        // Emit product quantity update
+        emitQuantityUpdate(product.id, {
+            product_id: product.id,
+            quantity_available: product.quantity_available - 1,
+            quantity_reserved: product.quantity_reserved + 1
+        });
+        
         // แจ้งเตือน owner ว่ามีคำขอเช่าใหม่
         await NotificationService.createNotification({
             user_id: product.owner_id,
@@ -98,6 +178,7 @@ const RentalService = {
             related_entity_id: rental.id,
             related_entity_uid: rental.rental_uid
         });
+        
         return rental;
     },
 
@@ -113,25 +194,54 @@ const RentalService = {
             throw new ApiError(httpStatusCodes.BAD_REQUEST, `Rental is not pending owner approval. Current status: ${rental.rental_status}`);
         }
 
-        const product = await ProductModel.findByIdOrSlug(rental.product_id, true); // fetch for update check
-         if (product.quantity_available < 1 && product.quantity > 0) {
-            throw new ApiError(httpStatusCodes.BAD_REQUEST, "Product became unavailable while pending approval. Please reject.");
+        let quantityReserved = false;
+        
+        try {
+            // ใช้ checkAndReserveQuantity เพื่อตรวจสอบและจองจำนวนสินค้าอย่างปลอดภัย
+            await ProductModel.checkAndReserveQuantity(rental.product_id, 1);
+            quantityReserved = true;
+        } catch (error) {
+            if (error.message.includes('insufficient quantity') || error.message.includes('unavailable') || error.message.includes('not available for rental') || error.message.includes('out of stock')) {
+                throw new ApiError(httpStatusCodes.BAD_REQUEST, 
+                    "Product became unavailable while pending approval. Please reject this rental request.");
+            }
+            throw error;
         }
 
-        const updatedRental = await RentalModel.update(rental.id, { rental_status: 'pending_payment' });
-        await RentalStatusHistoryModel.create(rental.id, 'pending_payment', ownerId, "Rental approved by owner.", rental.rental_status);
-        // Notification: แจ้ง renter ว่าได้รับการอนุมัติ
-        await NotificationService.createNotification({
-            user_id: rental.renter_id,
-            type: 'rental_approved',
-            title: 'คำขอเช่าของคุณได้รับการอนุมัติ',
-            message: `คำขอเช่าสินค้า ${product.title} ได้รับการอนุมัติ`,
-            link_url: `/rentals/${rental.id}`,
-            related_entity_type: 'rental',
-            related_entity_id: rental.id,
-            related_entity_uid: rental.rental_uid
-        });
-        return updatedRental;
+        try {
+            const updatedRental = await RentalModel.update(rental.id, { rental_status: 'pending_payment' });
+            await RentalStatusHistoryModel.create(rental.id, 'pending_payment', ownerId, "Rental approved by owner.", rental.rental_status);
+            
+            // ดึงข้อมูลสินค้าเพื่อใช้ในการแจ้งเตือน
+            const product = await ProductModel.findByIdOrSlug(rental.product_id);
+            
+            // Emit realtime events
+            emitRentalUpdate(updatedRental.id, updatedRental);
+            
+            // Notification: แจ้ง renter ว่าได้รับการอนุมัติ
+            await NotificationService.createNotification({
+                user_id: rental.renter_id,
+                type: 'rental_approved',
+                title: 'คำขอเช่าของคุณได้รับการอนุมัติ',
+                message: `คำขอเช่าสินค้า ${product.title} ได้รับการอนุมัติ`,
+                link_url: `/rentals/${rental.id}`,
+                related_entity_type: 'rental',
+                related_entity_id: rental.id,
+                related_entity_uid: rental.rental_uid
+            });
+            
+            return updatedRental;
+        } catch (error) {
+            // หากการอัปเดต rental ล้มเหลว ให้คืน quantity ที่จองไว้
+            if (quantityReserved) {
+                try {
+                    await ProductModel.releaseReservedQuantity(rental.product_id, 1, 'rental_approval_failed');
+                } catch (rollbackError) {
+                    console.error('Failed to rollback quantity reservation:', rollbackError);
+                }
+            }
+            throw error;
+        }
     },
 
     async rejectRentalRequest(rentalIdOrUid, ownerId, reason) {
@@ -154,6 +264,10 @@ const RentalService = {
         };
         const updatedRental = await RentalModel.update(rental.id, updatePayload);
         await RentalStatusHistoryModel.create(rental.id, 'rejected_by_owner', ownerId, `Rejected: ${reason}`, rental.rental_status);
+        
+        // Emit realtime events
+        emitRentalUpdate(updatedRental.id, updatedRental);
+        
         // Notification: แจ้ง renter ว่าถูกปฏิเสธ
         await NotificationService.createNotification({
             user_id: rental.renter_id,
@@ -203,6 +317,9 @@ const RentalService = {
         const updatedRental = await RentalModel.update(rental.id, updatePayload);
         await RentalStatusHistoryModel.create(rental.id, 'confirmed', renterId, "Payment proof submitted.", rental.rental_status);
 
+        // Emit realtime events
+        emitRentalUpdate(updatedRental.id, updatedRental);
+
         // Create payment transaction record
         await PaymentTransactionModel.create({
             rental_id: rental.id,
@@ -219,12 +336,8 @@ const RentalService = {
             transaction_time: paymentDetails.transaction_time ? new Date(paymentDetails.transaction_time) : new Date(),
         });
         
-        // TODO: Send notification to Owner/Admin for verification
-        // If auto-verified (e.g. amount matches perfectly)
-        // then update product quantity_available here
-        // For Day 4, manual verification is assumed to happen later by Admin/Owner
-        // If rental_status became 'confirmed' here, then:
-        // await ProductModel.updateQuantityAvailable(rental.product_id, -1);
+        // หมายเหตุ: quantity ถูกจองไว้แล้วตอน createRental
+        // เมื่อชำระเงินสำเร็จ quantity จะถูกหักจริงใน payment verification
 
         // แจ้งเตือน owner ว่ามีการอัปโหลดสลิป รอการตรวจสอบ
         await NotificationService.createNotification({
@@ -275,18 +388,21 @@ const RentalService = {
         const updatePayload = {
             rental_status: 'cancelled_by_renter',
             cancellation_reason: reason,
-            cancelled_at: new Date().toISOString(),
+            cancelled_at: getCurrentDateISO(),
             cancelled_by_user_id: userId
         };
         const updatedRental = await RentalModel.update(rental.id, updatePayload);
         await RentalStatusHistoryModel.create(rental.id, 'cancelled_by_renter', userId, `Cancelled by renter: ${reason}`, rental.rental_status);
 
+        // Emit realtime events
+        emitRentalUpdate(updatedRental.id, updatedRental);
+
         // If product quantity was decremented, increment it back
         if (['confirmed', 'active'].includes(rental.rental_status) && rental.product?.id) {
             try {
-                 await ProductModel.updateQuantityAvailable(rental.product.id, 1);
+                await ProductModel.releaseReservedQuantity(rental.product.id, 1, 'rental_cancelled');
             } catch (qtyError) {
-                 console.error("Error restoring product quantity after cancellation:", qtyError);
+                console.error("Error restoring product quantity after cancellation:", qtyError);
             }
         }
 
@@ -376,8 +492,8 @@ const RentalService = {
         if (!["active", "confirmed"].includes(rental.rental_status)) {
             throw new ApiError(httpStatusCodes.BAD_REQUEST, `Cannot initiate return. Rental status is currently '${rental.rental_status}'.`);
         }
-        if (returnDetails.return_method === 'shipping' && !returnDetails.return_details.location) {
-            throw new ApiError(httpStatusCodes.BAD_REQUEST, "Location is required for shipping return.");
+        if (returnDetails.return_method === 'shipping' && (!returnDetails.return_details || !returnDetails.return_details.carrier)) {
+            throw new ApiError(httpStatusCodes.BAD_REQUEST, "Carrier is required for shipping return.");
         }
 
         // Map FE value to DB enum
@@ -385,10 +501,7 @@ const RentalService = {
         if (dbReturnMethod === 'shipping') dbReturnMethod = 'owner_pickup';
         if (dbReturnMethod === 'in_person') dbReturnMethod = 'self_return';
 
-        // Map return_location -> location ถ้ามี
-        if (returnDetails.return_details && returnDetails.return_details.return_location && !returnDetails.return_details.location) {
-            returnDetails.return_details.location = returnDetails.return_details.return_location;
-        }
+
 
         const updatePayload = {
             rental_status: 'return_pending',
@@ -407,7 +520,13 @@ const RentalService = {
             notificationMessage += `\n- เลข Tracking: ${returnDetails.return_details.tracking_number}`;
             if (receiptImage) {
                 const bucketName = 'shipping-receipts';
-                const fileName = `rental-${rental.id}-receipt-${Date.now()}-${receiptImage.originalname}`;
+                // Sanitize filename to remove invalid characters for Supabase storage
+                const sanitizedOriginalName = receiptImage.originalname
+                    .replace(/[^a-zA-Z0-9.-]/g, '_') // Replace non-alphanumeric chars with underscore
+                    .replace(/_{2,}/g, '_') // Replace multiple underscores with single
+                    .replace(/^_|_$/g, ''); // Remove leading/trailing underscores
+                
+                const fileName = `rental-${rental.id}-receipt-${Date.now()}-${sanitizedOriginalName}`;
                 const { publicUrl } = await FileService.uploadFileToSupabaseStorage(receiptImage, bucketName, `public/${fileName}`);
                 updatePayload.return_shipping_receipt_url = publicUrl;
                 notificationMessage += `\n- มีการแนบสลิปการส่ง`;
@@ -431,6 +550,9 @@ const RentalService = {
             `Renter initiated return process. Method: ${returnDetails.return_method}.`,
             rental.rental_status
         );
+
+        // Emit realtime events
+        emitRentalUpdate(updatedRental.id, updatedRental);
 
         await NotificationService.createNotification({
             user_id: rental.owner_id,
@@ -457,12 +579,25 @@ const RentalService = {
             .eq('transaction_type', 'rental_fee_payout')
             .maybeSingle();
         if (existing) return; // มีแล้ว ไม่ต้องสร้างซ้ำ
-        // คำนวณยอด payout
-        let payout = rental.owner_payout_amount;
-        if (payout == null) {
-            const base = rental.final_amount_paid ?? rental.total_amount_due ?? 0;
-            payout = base - (rental.platform_fee_owner ?? 0);
+        
+        // คำนวณยอด payout (ไม่รวมค่าปรับล่าช้า เพราะหักจากเงินประกันแล้ว)
+        const base = rental.final_amount_paid ?? rental.total_amount_due ?? 0;
+        const payout = base - (rental.platform_fee_owner ?? 0);
+        
+        // สร้าง transaction สำหรับค่าปรับล่าช้า (ถ้ามี) - เป็นการบันทึกการหักจากเงินประกัน
+        const lateFee = rental.late_fee_calculated ?? 0;
+        if (lateFee > 0) {
+            await supabase.from('payment_transactions').insert([{
+                user_id: rental.owner_id,
+                rental_id: rental.id,
+                transaction_type: 'late_fee_payment',
+                amount: lateFee,
+                status: 'successful',
+                transaction_time: new Date().toISOString(),
+                notes: `Late fee deducted from security deposit for ${Math.ceil(lateFee / (rental.rental_price_per_day_at_booking || 1))} days overdue`
+            }]);
         }
+        
         await supabase.from('payment_transactions').insert([{
             user_id: rental.owner_id,
             rental_id: rental.id,
@@ -497,12 +632,43 @@ const RentalService = {
             newRentalStatus = 'dispute';
         }
         updatePayload.rental_status = newRentalStatus;
+
+        // คำนวณค่าปรับล่าช้า (ถ้ามี) และหักจากเงินประกัน
+        let lateFee = 0;
+        let securityDepositRefund = rental.security_deposit_at_booking || 0;
+        if (actual_return_time) {
+            lateFee = await this.calculateLateFee(rental, actual_return_time);
+            updatePayload.late_fee_calculated = lateFee;
+            
+            // ตรวจสอบความถูกต้องของการคำนวณค่าปรับล่าช้า
+            if (lateFee < 0) {
+                throw new ApiError(httpStatusCodes.BAD_REQUEST, "Invalid late fee calculation.");
+            }
+            
+            // หักค่าปรับล่าช้าจากเงินประกัน
+            if (lateFee > 0) {
+                securityDepositRefund = Math.max(0, securityDepositRefund - lateFee);
+                updatePayload.security_deposit_refund_amount = securityDepositRefund;
+            }
+            
+            // ตรวจสอบความถูกต้องของการคำนวณเงินประกันที่จะคืน
+            if (securityDepositRefund < 0) {
+                throw new ApiError(httpStatusCodes.BAD_REQUEST, "Invalid security deposit refund calculation.");
+            }
+        }
+
         // Handle return condition images
         if (imageFiles && imageFiles.length > 0) {
             const imageUrls = [];
             const bucketName = 'return-condition-images';
             for (const file of imageFiles) {
-                const fileName = `rental-${rental.id}-return-${Date.now()}-${file.originalname}`;
+                // Sanitize filename to remove invalid characters for Supabase storage
+                const sanitizedOriginalName = file.originalname
+                    .replace(/[^a-zA-Z0-9.-]/g, '_') // Replace non-alphanumeric chars with underscore
+                    .replace(/_{2,}/g, '_') // Replace multiple underscores with single
+                    .replace(/^_|_$/g, ''); // Remove leading/trailing underscores
+                
+                const fileName = `rental-${rental.id}-return-${Date.now()}-${sanitizedOriginalName}`;
                 const { publicUrl } = await FileService.uploadFileToSupabaseStorage(file, bucketName, `public/${fileName}`);
                 if (publicUrl) imageUrls.push(publicUrl);
             }
@@ -516,23 +682,63 @@ const RentalService = {
             `Return processed. Condition: ${return_condition_status}. Notes: ${notes_from_owner_on_return || ''}`, 
             rental.rental_status
         );
+
+        // Emit realtime events
+        emitRentalUpdate(updatedRental.id, updatedRental);
+
         if (newRentalStatus === 'completed') {
             try {
                 if (rental.product_id) {
-                    await ProductModel.updateQuantityAvailable(rental.product_id, 1);
+                    await ProductModel.releaseReservedQuantity(rental.product_id, 1, 'rental_completed');
                 }
             } catch (qtyError) {
                 console.error("Error restoring product quantity after completion:", qtyError);
             }
             // --- เรียก payout อัตโนมัติ ---
             await this.createPayoutTransactionForRental({ ...rental, ...updatePayload });
+            
+            // ส่งการแจ้งเตือนให้ผู้เช่าทราบเรื่องการคืนเงินประกัน
+            let notificationMessage = `การคืนสินค้าสำหรับ '${rental.product?.title || ''}' ได้รับการยืนยันเรียบร้อยแล้ว`;
+            
+            if (lateFee > 0) {
+                notificationMessage += `\n\nค่าปรับล่าช้า: ฿${lateFee.toLocaleString()} (หักจากเงินประกัน)`;
+                notificationMessage += `\nเงินประกันที่จะได้รับคืน: ฿${securityDepositRefund.toLocaleString()}`;
+                notificationMessage += `\n\nกรุณาติดต่อเจ้าของสินค้าผ่านแชทเพื่อรับเงินประกันคืน`;
+            } else {
+                notificationMessage += `\n\nเงินประกัน: ฿${securityDepositRefund.toLocaleString()}`;
+                notificationMessage += `\nกรุณาติดต่อเจ้าของสินค้าผ่านแชทเพื่อรับเงินประกันคืน`;
+            }
+            
             // Send notification to renter about completion
             await NotificationService.createNotification({
                 user_id: rental.renter_id,
                 type: 'return_confirmed',
                 title: 'การคืนสินค้าของคุณได้รับการยืนยัน',
-                message: `การคืนสินค้าสำหรับ '${rental.product?.title || ''}' ได้รับการยืนยันเรียบร้อยแล้ว ขอบคุณที่ใช้บริการ` ,
+                message: notificationMessage,
                 link_url: `/rentals/${rental.id}`,
+                related_entity_type: 'rental',
+                related_entity_id: rental.id,
+                related_entity_uid: rental.rental_uid
+            });
+            
+            // ส่งการแจ้งเตือนให้เจ้าของสินค้าทราบเรื่องการคืนเงินประกัน
+            let ownerNotificationMessage = `การคืนสินค้า '${rental.product?.title || ''}' เสร็จสิ้นแล้ว`;
+            
+            if (lateFee > 0) {
+                ownerNotificationMessage += `\n\nค่าปรับล่าช้า: ฿${lateFee.toLocaleString()} (หักจากเงินประกันแล้ว)`;
+                ownerNotificationMessage += `\nเงินประกันที่ต้องคืนให้ผู้เช่า: ฿${securityDepositRefund.toLocaleString()}`;
+                ownerNotificationMessage += `\n\nกรุณาติดต่อผู้เช่าผ่านแชทเพื่อคืนเงินประกัน`;
+            } else {
+                ownerNotificationMessage += `\n\nเงินประกันที่ต้องคืนให้ผู้เช่า: ฿${securityDepositRefund.toLocaleString()}`;
+                ownerNotificationMessage += `\nกรุณาติดต่อผู้เช่าผ่านแชทเพื่อคืนเงินประกัน`;
+            }
+            
+            await NotificationService.createNotification({
+                user_id: rental.owner_id,
+                type: 'return_confirmed',
+                title: 'การคืนสินค้าเสร็จสิ้นแล้ว',
+                message: ownerNotificationMessage,
+                link_url: `/owner/rentals/${rental.id}`,
                 related_entity_type: 'rental',
                 related_entity_id: rental.id,
                 related_entity_uid: rental.rental_uid
@@ -691,9 +897,10 @@ const RentalService = {
         await NotificationService.createNotification(renterNotification);
         await NotificationService.createNotification(ownerNotification);
 
-        // 6. If payment was successful, update product availability
+        // 6. If payment was successful, quantity was already reserved during createRental
+        // No need to update quantity again here as it's already handled
         if (wasSuccessful) {
-            await ProductModel.updateQuantityAvailable(rental.product_id, -1);
+            console.log(`Payment verified for rental ${rental.id}. Product quantity already reserved.`);
         }
 
         return updatedRental;
@@ -713,7 +920,22 @@ const RentalService = {
             payment_verified_by_user_id: null
         };
         await RentalModel.update(rental.id, updatePayload);
-        // แจ้งเตือน renter (optional)
+        await RentalStatusHistoryModel.create(rental.id, 'pending_payment', ownerId, "Payment proof marked as invalid by owner.", rental.rental_status);
+
+        // Emit realtime events
+        emitRentalUpdate(rental.id, { ...rental, ...updatePayload });
+
+        // Notification: แจ้ง renter ว่าสลิปไม่ถูกต้อง
+        await NotificationService.createNotification({
+            user_id: rental.renter_id,
+            type: 'payment_slip_invalid',
+            title: 'สลิปการชำระเงินไม่ถูกต้อง',
+            message: `สลิปการชำระเงินสำหรับการเช่า '${rental.product?.title || ''}' ไม่ถูกต้อง กรุณาตรวจสอบและอัปโหลดสลิปอีกครั้ง`,
+            link_url: `/rentals/${rental.id}`,
+            related_entity_type: 'rental',
+            related_entity_id: rental.id,
+            related_entity_uid: rental.rental_uid
+        });
         return { success: true };
     },
 
@@ -754,6 +976,19 @@ const RentalService = {
             .lt('end_date', todayStr);
         if (overdueError) throw overdueError;
         for (const rental of overdueRentals || []) {
+            // อัปเดตสถานะเป็น late_return
+            await RentalModel.update(rental.id, { rental_status: 'late_return' });
+            await RentalStatusHistoryModel.create(
+                rental.id, 
+                'late_return', 
+                null, 
+                'System automatically marked as late return', 
+                rental.rental_status
+            );
+            
+            // Emit realtime events
+            emitRentalUpdate(rental.id, { ...rental, rental_status: 'late_return' });
+
             await NotificationService.createNotification({
                 user_id: rental.renter_id,
                 type: 'rental_overdue',
@@ -779,12 +1014,22 @@ const RentalService = {
         if (rental.payment_status !== 'pending_verification' || rental.rental_status !== 'confirmed') {
             throw new ApiError(httpStatusCodes.BAD_REQUEST, `Rental is not pending payment verification. Current status: ${rental.rental_status}, payment_status: ${rental.payment_status}`);
         }
+        
+        // ตรวจสอบความถูกต้องของจำนวนเงินที่ชำระ
+        const finalAmountPaid = amount_paid ? parseFloat(amount_paid) : rental.final_amount_paid || rental.total_amount_due;
+        if (finalAmountPaid < 0) {
+            throw new ApiError(httpStatusCodes.BAD_REQUEST, "Invalid payment amount.");
+        }
+        if (finalAmountPaid < rental.total_amount_due) {
+            throw new ApiError(httpStatusCodes.BAD_REQUEST, "Payment amount is less than the total amount due.");
+        }
+        
         const now = new Date().toISOString();
         const updatePayload = {
             payment_status: 'paid',
             payment_verified_at: now,
             payment_verified_by_user_id: ownerId,
-            final_amount_paid: amount_paid ? parseFloat(amount_paid) : rental.final_amount_paid || rental.total_amount_due,
+            final_amount_paid: finalAmountPaid,
             // Optionally, set rental_status: 'active' if needed
         };
         const updatedRental = await RentalModel.update(rental.id, updatePayload);
@@ -795,6 +1040,10 @@ const RentalService = {
             `Owner verified payment.`,
             rental.rental_status
         );
+
+        // Emit realtime events
+        emitRentalUpdate(updatedRental.id, updatedRental);
+
         // Notify renter
         await NotificationService.createNotification({
             user_id: rental.renter_id,
@@ -834,17 +1083,37 @@ const RentalService = {
         if (!actualPickupTime) {
             throw new ApiError(httpStatusCodes.BAD_REQUEST, "actual_pickup_time is required.");
         }
+        
+        // Update both actual_pickup_time and delivery_status to 'delivered'
         const updatePayload = {
-            actual_pickup_time: actualPickupTime
+            actual_pickup_time: actualPickupTime,
+            delivery_status: 'delivered'
         };
+        
         const updatedRental = await RentalModel.update(rental.id, updatePayload);
         await RentalStatusHistoryModel.create(
             rental.id,
             updatedRental.rental_status,
             userId,
-            `Renter set actual pickup time: ${actualPickupTime}`,
+            `Renter set actual pickup time: ${actualPickupTime} and marked as delivered`,
             rental.rental_status
         );
+
+        // Emit realtime events
+        emitRentalUpdate(updatedRental.id, updatedRental);
+
+        // Notify owner that item has been delivered
+        await NotificationService.createNotification({
+            user_id: rental.owner_id,
+            type: 'item_delivered',
+            title: 'สินค้าถูกจัดส่งแล้ว',
+            message: `ผู้เช่าได้ยืนยันการรับสินค้า '${rental.product?.title || ''}' แล้ว`,
+            link_url: `/owner/rentals/${rental.id}`,
+            related_entity_type: 'rental',
+            related_entity_id: rental.id,
+            related_entity_uid: rental.rental_uid
+        });
+        
         return updatedRental;
     }
 };

@@ -1,121 +1,33 @@
 import express from 'express';
 import ProductController from '../controllers/product.controller.js';
 import ReviewController from '../controllers/review.controller.js';
-import validateRequest from '../middleware/validateRequest.js';
-import { getProductsQuerySchema, getProductReviewsQuerySchema, createProductSchema, updateProductSchema, updateProductStatusSchema } from '../DTOs/product.dto.js';
 import authenticateJWT from '../middleware/authenticateJWT.js';
-import parseSpecifications from '../middleware/parseSpecifications.js';
+import validateRequest from '../middleware/validateRequest.js';
 import { uploadMultipleFields } from '../middleware/fileUpload.js';
-import Joi from 'joi';
-import { createReviewSchema } from '../DTOs/review.dto.js';
+import { getProductsQuerySchema, getProductReviewsQuerySchema } from '../DTOs/product.dto.js';
 
 const router = express.Router();
 
-// Log request body for debugging
-router.use((req, res, next) => {
-    console.log('Product Router Request Body:', req.body);
-    console.log('Product Router Request Files:', req.files); // Enable file debugging
-    next();
-});
-
 // Public routes
-router.get(
-    '/',
-    validateRequest(getProductsQuerySchema, 'query'),
-    ProductController.getAllProducts
-);
+router.get('/', validateRequest(getProductsQuerySchema, 'query'), ProductController.getAllProducts);
+router.get('/search', validateRequest(getProductsQuerySchema, 'query'), ProductController.getAllProducts);
+router.get('/featured', ProductController.getFeaturedProducts);
+router.get('/popular', ProductController.getTopRentedProducts);
+router.get('/top-rented', ProductController.getTopRentedProducts);
 
-router.get(
-    '/popular',
-    ProductController.getTopRentedProducts
-);
+// Product creation and update routes (protected)
+router.post('/', authenticateJWT, uploadMultipleFields([{ name: 'images[]', maxCount: 10 }]), ProductController.createProduct);
+router.put('/:slugOrId', authenticateJWT, uploadMultipleFields([{ name: 'new_images[]', maxCount: 10 }]), ProductController.updateProduct);
 
-router.get(
-    '/:product_slug_or_id',
-    ProductController.getProductByIdOrSlug
-);
+// Product reviews (public)
+router.get('/:productId/reviews', validateRequest(getProductReviewsQuerySchema, 'query'), ReviewController.getProductReviews);
 
-router.get(
-    '/:productId/availability',
-    validateRequest(
-        Joi.object({
-            month: Joi.string().regex(/^\d{4}-\d{2}$/).required().messages({
-                'string.pattern.base': 'Month must be in YYYY-MM format',
-                'any.required': 'Month query parameter is required (YYYY-MM)'
-            })
-        }),
-        'query'
-    ),
-    ProductController.getProductAvailability
-);
+// Product detail route (public) - must come after other specific routes
+router.get('/:slugOrId', ProductController.getProductByIdOrSlug);
+router.get('/:productId/availability/:yearMonth', ProductController.getProductAvailability);
 
-router.get(
-    '/:productId/reviews',
-    validateRequest(getProductReviewsQuerySchema, 'query'),
-    ReviewController.getProductReviews
-);
+// Admin/Maintenance routes (protected)
+router.post('/sync-quantities', authenticateJWT, ProductController.syncProductQuantities);
+router.post('/:productId/sync-quantity', authenticateJWT, ProductController.syncSingleProductQuantity);
 
-// Protected routes (require authentication)
-router.post(
-    '/',
-    authenticateJWT,
-    uploadMultipleFields([{ name: 'images[]', maxCount: 10 }]), // Use proper fileUpload middleware
-    parseSpecifications, 
-    validateRequest(createProductSchema, 'body'),
-    ProductController.createProduct
-);
-
-// PUT route to update a product
-router.put(
-    '/:product_slug_or_id',
-    authenticateJWT, 
-    uploadMultipleFields([
-        { name: 'new_images[]', maxCount: 10 } // Only handle file fields here
-    ]),
-    parseSpecifications, // Parse specifications from string if included
-    validateRequest(updateProductSchema, 'body'), // Validate request body with update schema
-    ProductController.updateProduct 
-);
-
-// PUT route to update product availability status
-router.put(
-    '/:productId/status',
-    authenticateJWT,
-    validateRequest(updateProductStatusSchema, 'body'),
-    ProductController.updateProductStatus // We will create this controller function next
-);
-
-// DELETE route to remove a product image
-router.delete(
-    '/:productId/images/:imageId',
-    authenticateJWT,
-    ProductController.deleteProductImage // We will create this controller function next
-);
-
-// DELETE route to remove a product
-router.delete(
-    '/:productId',
-    authenticateJWT,
-    ProductController.deleteProduct // We will create this controller function next
-);
-
-// POST /reviews (rental review)
-router.post('/reviews', authenticateJWT, validateRequest(createReviewSchema, 'body'), ReviewController.createReview);
-
-// GET /reviews/:rentalId (public)
-router.get('/reviews/:rentalId', ReviewController.getReviewByRental);
-
-// PUT /reviews/:rentalId (update review)
-router.put('/reviews/:rentalId', authenticateJWT, ReviewController.updateReview);
-
-// DELETE /reviews/:rentalId (delete review)
-router.delete('/reviews/:rentalId', authenticateJWT, ReviewController.deleteReview);
-
-// Admin/Development: อัปเดต average_rating และ total_reviews ของสินค้าทั้งหมด
-router.post(
-    '/reviews/update-all-product-rating-stats',
-    authenticateJWT,
-    ReviewController.updateAllProductRatingStats
-);
-
-export default router; 
+export default router;

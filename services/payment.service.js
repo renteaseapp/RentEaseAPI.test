@@ -5,6 +5,7 @@ import ProductModel from '../models/product.model.js';
 import { ApiError } from '../utils/apiError.js';
 import httpStatusCodes from '../constants/httpStatusCodes.js';
 import NotificationService from './notification.service.js';
+import { emitRentalUpdate } from '../server.js';
 
 const PaymentService = {
     async initiateGatewayPayment(rentalId, renterId, paymentMethodType) {
@@ -98,13 +99,12 @@ const PaymentService = {
             });
             await RentalStatusHistoryModel.create(updatedRental.id, 'confirmed', rental.renter_id, "Payment successful via gateway.");
             
-            // Decrease product quantity
-            try {
-                await ProductModel.updateQuantityAvailable(updatedRental.product_id, -1);
-            } catch (qtyError) {
-                console.error("Error updating product quantity after payment:", qtyError);
-                // Log this error, but payment is already processed.
-            }
+            // Emit realtime events
+            emitRentalUpdate(updatedRental.id, updatedRental);
+            
+            // หมายเหตุ: Product quantity ถูกจองไว้แล้วตอน createRental
+            // ไม่จำเป็นต้องหัก quantity อีกครั้ง
+            console.log(`Payment confirmed for rental ${updatedRental.id}. Product quantity already reserved.`);
             
             // Send notification to renter and owner
             await NotificationService.createNotification({
@@ -139,6 +139,9 @@ const PaymentService = {
             // Optionally update rental payment_status
             await RentalModel.update(paymentTransaction.rental_id, { payment_status: 'failed' });
             await RentalStatusHistoryModel.create(paymentTransaction.rental_id, 'payment_failed', rental.renter_id, "Payment failed via gateway.");
+            
+            // Emit realtime events
+            emitRentalUpdate(paymentTransaction.rental_id, { ...rental, payment_status: 'failed' });
             
             // Send notification to renter about payment failure
             await NotificationService.createNotification({

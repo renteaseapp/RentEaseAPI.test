@@ -1,4 +1,5 @@
 import ProductService from '../services/product.service.js';
+import ProductModel from '../models/product.model.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { ApiResponse } from '../utils/apiResponse.js';
 import httpStatusCodes from '../constants/httpStatusCodes.js';
@@ -18,8 +19,8 @@ const ProductController = {
     }),
 
     getProductByIdOrSlug: asyncHandler(async (req, res) => {
-        const { product_slug_or_id } = req.params;
-        const product = await ProductService.getProductDetails(product_slug_or_id);
+        const { slugOrId } = req.params;
+        const product = await ProductService.getProductDetails(slugOrId);
         res.status(httpStatusCodes.OK).json(
             new ApiResponse(httpStatusCodes.OK, { data: product })
         );
@@ -36,6 +37,11 @@ const ProductController = {
     }),
 
     createProduct: asyncHandler(async (req, res, next) => {
+        console.log('Create Product Request:');
+        console.log('Request Body:', req.body);
+        console.log('Request Files:', req.files);
+        console.log('Content-Type:', req.headers['content-type']);
+        
         if (!req.body) {
             throw new ApiError(httpStatusCodes.BAD_REQUEST, "Request body is required");
         }
@@ -68,12 +74,12 @@ const ProductController = {
     }),
 
     updateProduct: asyncHandler(async (req, res, next) => {
-        const { product_slug_or_id } = req.params;
+        const { slugOrId } = req.params;
         const ownerId = req.user.id;
         let productData = req.body;
 
         console.log('Update Product Request:');
-        console.log('Product ID/Slug:', product_slug_or_id);
+        console.log('Product ID/Slug:', slugOrId);
         console.log('Owner ID:', ownerId);
         console.log('Request Body:', productData);
 
@@ -108,7 +114,7 @@ const ProductController = {
         console.log('Final product data to update:', productData);
 
         // Pass data to the service
-        const updatedProduct = await ProductService.updateProduct(product_slug_or_id, ownerId, productData, newImages, removeImageIds);
+        const updatedProduct = await ProductService.updateProduct(slugOrId, ownerId, productData, newImages, removeImageIds);
         
         res.status(httpStatusCodes.OK).json(
             new ApiResponse(httpStatusCodes.OK, updatedProduct, "Product updated successfully")
@@ -154,11 +160,46 @@ const ProductController = {
     }),
 
     // สินค้ายอดนิยมจากยอดการเช่า (public)
+    getFeaturedProducts: asyncHandler(async (req, res) => {
+        const limit = parseInt(req.query.limit, 10) || 8;
+        const result = await ProductService.getProducts({ featured: true, limit });
+        res.status(httpStatusCodes.OK).json(
+            new ApiResponse(httpStatusCodes.OK, result, 'Featured products')
+        );
+    }),
+
     getTopRentedProducts: asyncHandler(async (req, res) => {
         const limit = parseInt(req.query.limit, 10) || 5;
         const products = await ProductService.getTopRentedProducts(limit);
         res.status(httpStatusCodes.OK).json(
             new ApiResponse(httpStatusCodes.OK, { data: products }, 'Top rented products')
+        );
+    }),
+
+    // ซิงค์ quantity ของสินค้าทั้งหมด (Admin/Maintenance)
+    syncProductQuantities: asyncHandler(async (req, res) => {
+        // ตรวจสอบสิทธิ์ admin (ถ้าจำเป็น)
+        // if (!req.user.isAdmin) {
+        //     throw new ApiError(httpStatusCodes.FORBIDDEN, "Admin access required");
+        // }
+
+        const result = await ProductModel.syncProductQuantities();
+        res.status(httpStatusCodes.OK).json(
+            new ApiResponse(httpStatusCodes.OK, result, 'Product quantities synchronized successfully')
+        );
+    }),
+
+    // ซิงค์ quantity ของสินค้าเฉพาะ ID
+    syncSingleProductQuantity: asyncHandler(async (req, res) => {
+        const { productId } = req.params;
+        
+        if (!productId || isNaN(productId)) {
+            throw new ApiError(httpStatusCodes.BAD_REQUEST, "Valid product ID is required");
+        }
+
+        const result = await ProductModel.syncProductQuantities(parseInt(productId));
+        res.status(httpStatusCodes.OK).json(
+            new ApiResponse(httpStatusCodes.OK, result, `Product ${productId} quantity synchronized successfully`)
         );
     })
 };

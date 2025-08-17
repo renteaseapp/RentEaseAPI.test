@@ -6,7 +6,7 @@ const USER_COLUMNS_TO_SELECT = `
     address_line1, address_line2, city, province_id, postal_code,
     id_verification_status, id_verification_notes, id_document_type,
     id_document_number, id_document_url, id_document_back_url, id_selfie_url,
-    created_at, updated_at
+    google_id, created_at, updated_at
 `;
 
 const UserModel = {
@@ -38,8 +38,18 @@ const UserModel = {
     async findByEmail(email) {
         const { data, error } = await supabase
             .from('users')
-            .select('id, email, first_name')
+            .select('*') // Select all columns to get full user object
             .eq('email', email.toLowerCase())
+            .maybeSingle();
+        if (error && error.code !== 'PGRST116') throw error;
+        return data;
+    },
+
+    async findByGoogleId(googleId) {
+        const { data, error } = await supabase
+            .from('users')
+            .select(USER_COLUMNS_TO_SELECT)
+            .eq('google_id', googleId)
             .maybeSingle();
         if (error && error.code !== 'PGRST116') throw error;
         return data;
@@ -56,7 +66,7 @@ const UserModel = {
     },
 
     async create(userData) {
-        const { username, email, password_hash, first_name, last_name, phone_number, registration_ip } = userData;
+        const { username, email, password_hash, first_name, last_name, phone_number, registration_ip, google_id, profile_picture_url, email_verified_at } = userData;
         const { data, error } = await supabase
             .from('users')
             .insert({
@@ -67,6 +77,9 @@ const UserModel = {
                 last_name,
                 phone_number,
                 registration_ip,
+                google_id,
+                profile_picture_url,
+                email_verified_at,
                 is_active: true,
                 id_verification_status: 'not_submitted',
             })
@@ -84,7 +97,7 @@ const UserModel = {
             'province_id', 'postal_code', 'id_verification_status', 
             'id_verification_notes', 'id_document_type', 'id_document_number',
             'id_document_url', 'id_document_back_url', 'id_selfie_url',
-            'id_verified_at', 'updated_at',
+            'id_verified_at', 'updated_at', 'google_id',
             'is_active', 'role'
         ];
 
@@ -99,19 +112,54 @@ const UserModel = {
             console.log('No updatable fields provided for user', id);
             return null;
         }
-        console.log('Updating user', id, dataToUpdate);
+
         const { data, error } = await supabase
             .from('users')
             .update(dataToUpdate)
-            .eq('id', Number(id))
+            .eq('id', id)
             .select(USER_COLUMNS_TO_SELECT)
             .single();
-        console.log('Update result:', data, error);
+
+        if (error) throw error;
+        return data;
+    },
+
+    // เพิ่ม method สำหรับอัปเดต Google ID
+    async updateGoogleId(userId, googleId) {
+        console.log('🔍 updateGoogleId called with:', { userId, googleId });
+        
+        // ตรวจสอบว่ามี user นี้อยู่จริงหรือไม่
+        const { data: existingUser, error: checkError } = await supabase
+            .from('users')
+            .select('id, email')
+            .eq('id', userId)
+            .maybeSingle();
+            
+        if (checkError && checkError.code !== 'PGRST116') {
+            console.error('❌ Error checking user existence:', checkError);
+            throw checkError;
+        }
+        
+        if (!existingUser) {
+            console.error('❌ User not found with ID:', userId);
+            throw new Error(`User with ID ${userId} not found`);
+        }
+        
+        console.log('🔍 User exists:', existingUser);
+        
+        const { data, error } = await supabase
+            .from('users')
+            .update({ google_id: googleId })
+            .eq('id', userId)
+            .select('id, google_id')
+            .single();
 
         if (error) {
-            console.error("Error updating user:", error);
+            console.error('❌ Error updating google_id:', error);
             throw error;
         }
+        
+        console.log('✅ Google ID updated successfully:', data);
         return data;
     },
 
@@ -151,42 +199,7 @@ const UserModel = {
         return data;
     },
 
-    async storeOtp(userId, otp) {
-        const expiresAt = new Date();
-        expiresAt.setMinutes(expiresAt.getMinutes() + 5); // OTP expires in 5 minutes
 
-        const { error } = await supabase
-            .from('password_reset_otps')
-            .upsert({
-                user_id: userId,
-                otp: otp,
-                expires_at: expiresAt.toISOString()
-            });
-
-        if (error) throw error;
-    },
-
-    async verifyOtp(userId, otp) {
-        const { data, error } = await supabase
-            .from('password_reset_otps')
-            .select('*')
-            .eq('user_id', userId)
-            .eq('otp', otp)
-            .gt('expires_at', new Date().toISOString())
-            .maybeSingle();
-
-        if (error) throw error;
-        return !!data;
-    },
-
-    async clearOtp(userId) {
-        const { error } = await supabase
-            .from('password_reset_otps')
-            .delete()
-            .eq('user_id', userId);
-
-        if (error) throw error;
-    },
 
     async updatePassword(userId, hashedPassword) {
         const { error } = await supabase
@@ -198,4 +211,4 @@ const UserModel = {
     }
 };
 
-export default UserModel; 
+export default UserModel;

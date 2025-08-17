@@ -41,7 +41,13 @@ const ComplaintService = {
         if (attachmentFiles && attachmentFiles.length > 0) {
             const bucketName = 'complaint-attachments';
             for (const file of attachmentFiles) {
-                const fileName = `complaint-${newComplaint.id}-${Date.now()}-${file.originalname}`;
+                // Sanitize filename to remove invalid characters for Supabase storage
+                const sanitizedOriginalName = file.originalname
+                    .replace(/[^a-zA-Z0-9.-]/g, '_') // Replace non-alphanumeric chars with underscore
+                    .replace(/_{2,}/g, '_') // Replace multiple underscores with single
+                    .replace(/^_|_$/g, ''); // Remove leading/trailing underscores
+                
+                const fileName = `complaint-${newComplaint.id}-${Date.now()}-${sanitizedOriginalName}`;
                 const { publicUrl } = await FileService.uploadFileToSupabaseStorage(file, bucketName, `public/${fileName}`);
 
                 if(publicUrl) {

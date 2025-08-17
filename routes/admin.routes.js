@@ -43,7 +43,10 @@ router.delete('/categories/:id', adminController.deleteCategory);
 // System Settings & Static Content
 router.get('/settings', adminController.getSettings);
 router.put('/settings', adminController.updateSettings);
-router.get('/static-pages', adminController.getStaticPages);
-router.put('/static-pages/:slug', adminController.updateStaticPage);
+
+// Admin Logs Management
+router.get('/logs', adminController.getAdminLogs);
+
+
 
 export default router; 
