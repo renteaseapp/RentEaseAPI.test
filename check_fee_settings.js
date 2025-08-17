@@ -46,7 +46,7 @@ async function checkFeeSettings() {
     console.log('=====================================');
     
     try {
-      const response = await fetch('http://localhost:3001/api/settings/calculate-fees', {
+      const response = await fetch('https://renteaseapi-test.onrender.com/api/settings/calculate-fees', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

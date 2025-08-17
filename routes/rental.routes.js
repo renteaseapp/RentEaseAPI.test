@@ -121,6 +121,12 @@ router.put(
     RentalController.setActualPickupTime
 );
 
+// Owner completes rental directly
+router.put(
+    '/:rental_id_or_uid/complete',
+    RentalController.completeRentalDirectly // Owner authorization in service
+);
+
 // Other rental routes (GET specific rental, update status, etc.) will be added later
 
-export default router; 
+export default router;

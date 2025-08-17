@@ -1137,7 +1137,73 @@ const RentalService = {
         });
         
         return updatedRental;
+    },
+
+    async completeRentalDirectly(rentalIdOrUid, userId) {
+        const rental = await RentalModel.findByIdentifier(rentalIdOrUid);
+        if (!rental) {
+            throw new ApiError(httpStatusCodes.NOT_FOUND, "Rental not found.");
+        }
+
+        // Check if user is the owner of the rental
+        if (rental.owner_id !== userId) {
+            throw new ApiError(httpStatusCodes.FORBIDDEN, "Only the owner can complete the rental directly.");
+        }
+
+        // Check if rental is in a state that can be completed
+        if (!['active', 'dispute', 'return_initiated'].includes(rental.rental_status)) {
+            throw new ApiError(httpStatusCodes.BAD_REQUEST, "Rental cannot be completed in its current status.");
+        }
+
+        // Calculate late fee if applicable
+        const currentTime = getCurrentDateISO();
+        const lateFee = await this.calculateLateFee(rental, currentTime);
+
+        // Calculate security deposit refund
+        let securityDepositRefund = rental.security_deposit || 0;
+        if (lateFee > 0) {
+            securityDepositRefund = Math.max(0, securityDepositRefund - lateFee);
+        }
+
+        // Update rental status to completed
+        const updatePayload = {
+            rental_status: 'completed',
+            actual_return_time: currentTime,
+            late_fee_calculated: lateFee,
+            security_deposit_refund_amount: securityDepositRefund
+        };
+
+        const updatedRental = await RentalModel.update(rental.id, updatePayload);
+
+        // Create status history
+        await RentalStatusHistoryModel.create(
+            rental.id,
+            'completed',
+            userId,
+            'Rental completed directly by owner',
+            rental.rental_status
+        );
+
+        // Create payout transaction for the owner
+        await this.createPayoutTransactionForRental(updatedRental);
+
+        // Emit realtime events
+        emitRentalUpdate(updatedRental.id, updatedRental);
+
+        // Notify renter that rental is completed
+        await NotificationService.createNotification({
+            user_id: rental.renter_id,
+            type: 'rental_completed',
+            title: 'การเช่าเสร็จสิ้นแล้ว',
+            message: `การเช่าสินค้า '${rental.product?.title || ''}' ได้เสร็จสิ้นแล้ว`,
+            link_url: `/renter/rentals/${rental.id}`,
+            related_entity_type: 'rental',
+            related_entity_id: rental.id,
+            related_entity_uid: rental.rental_uid
+        });
+
+        return updatedRental;
     }
 };
 
-export default RentalService; 
+export default RentalService;

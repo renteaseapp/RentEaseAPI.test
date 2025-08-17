@@ -207,14 +207,23 @@ const RentalController = {
     }),
 
     setActualPickupTime: asyncHandler(async (req, res) => {
-        const userId = req.user.id;
+        const renterId = req.user.id;
         const { rental_id_or_uid } = req.params;
-        const { actual_pickup_time } = req.body;
-        const updatedRental = await RentalService.setActualPickupTime(rental_id_or_uid, userId, actual_pickup_time);
+        const { actual_pickup_time } = req.validatedData;
+        const updatedRental = await RentalService.setActualPickupTime(rental_id_or_uid, renterId, actual_pickup_time);
         res.status(httpStatusCodes.OK).json(
-            new ApiResponse(httpStatusCodes.OK, { data: updatedRental }, "Actual pickup time updated successfully.")
+            new ApiResponse(httpStatusCodes.OK, { data: updatedRental }, "Actual pickup time set successfully.")
+        );
+    }),
+
+    completeRentalDirectly: asyncHandler(async (req, res) => {
+        const ownerId = req.user.id;
+        const { rental_id_or_uid } = req.params;
+        const updatedRental = await RentalService.completeRentalDirectly(rental_id_or_uid, ownerId);
+        res.status(httpStatusCodes.OK).json(
+            new ApiResponse(httpStatusCodes.OK, { data: updatedRental }, "Rental completed successfully.")
         );
     })
 };
 
-export default RentalController; 
+export default RentalController;
