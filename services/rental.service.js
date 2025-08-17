@@ -73,7 +73,20 @@ const RentalService = {
 
         const startDateObj = new Date(start_date);
         const endDateObj = new Date(end_date);
-        const rentalDurationDays = Math.ceil((endDateObj - startDateObj) / (1000 * 60 * 60 * 24)) + 1;
+        // คำนวณวันเช่าให้ตรงกับ Frontend (ไม่ต้องบวก 1)
+        const rentalDurationDays = Math.ceil((endDateObj - startDateObj) / (1000 * 60 * 60 * 24));
+        
+        // Debug logging
+        console.log('🔍 Backend Rental Service - Date Calculation:', {
+            start_date,
+            end_date,
+            startDateObj: startDateObj.toISOString(),
+            endDateObj: endDateObj.toISOString(),
+            timeDiffMs: endDateObj - startDateObj,
+            timeDiffDays: (endDateObj - startDateObj) / (1000 * 60 * 60 * 24),
+            rentalDurationDays,
+            productRentalPrice: product.rental_price_per_day
+        });
 
         if (rentalDurationDays < (product.min_rental_duration_days || 1)) {
             throw new ApiError(httpStatusCodes.BAD_REQUEST, `Minimum rental duration is ${product.min_rental_duration_days || 1} days.`);
@@ -95,24 +108,38 @@ const RentalService = {
         }
 
         const subtotalRentalFee = product.rental_price_per_day * rentalDurationDays;
+        
+        // คำนวณค่าส่ง
         let deliveryFee = 0;
         if (pickup_method === 'delivery') {
-            const deliveryFeeBaseSetting = await SystemSettingModel.getSetting('delivery_fee_base', '0');
-            deliveryFee = parseFloat(deliveryFeeBaseSetting.setting_value) || 0;
+            const deliveryFeeBaseSetting = await SystemSettingModel.getSetting('delivery_fee_base', '0.0');
+            deliveryFee = parseFloat(deliveryFeeBaseSetting.setting_value) || 0.0;
         }
         let platformFeeRenter = 0;
-        const platformFeeRenterPercentSetting = await SystemSettingModel.getSetting('platform_fee_percentage', '0');
-        const platformFeeRenterPercent = parseFloat(platformFeeRenterPercentSetting.setting_value) / 100 || 0;
+        const platformFeeRenterPercentSetting = await SystemSettingModel.getSetting('platform_fee_percentage', '0.0');
+        const platformFeeRenterPercent = parseFloat(platformFeeRenterPercentSetting.setting_value) / 100 || 0.0;
         if (platformFeeRenterPercent > 0) {
             platformFeeRenter = subtotalRentalFee * platformFeeRenterPercent;
         }
         let platformFeeOwner = 0;
-        const platformFeeOwnerPercentSetting = await SystemSettingModel.getSetting('platform_fee_owner_percentage', '0');
-        const platformFeeOwnerPercent = parseFloat(platformFeeOwnerPercentSetting.setting_value) / 100 || 0;
+        const platformFeeOwnerPercentSetting = await SystemSettingModel.getSetting('platform_fee_owner_percentage', '0.0');
+        const platformFeeOwnerPercent = parseFloat(platformFeeOwnerPercentSetting.setting_value) / 100 || 0.0;
         if (platformFeeOwnerPercent > 0) {
             platformFeeOwner = subtotalRentalFee * platformFeeOwnerPercent;
         }
         const securityDeposit = product.security_deposit || 0;
+        
+        // Debug logging - Fee calculation (ย้ายมาหลังจากประกาศตัวแปรทั้งหมดแล้ว)
+        console.log('🔍 Backend Rental Service - Fee Calculation:', {
+            rentalDurationDays,
+            productRentalPrice: product.rental_price_per_day,
+            subtotalRentalFee,
+            securityDeposit,
+            deliveryFee,
+            platformFeeRenter,
+            platformFeeOwner,
+            totalAmountDue: subtotalRentalFee + securityDeposit + deliveryFee + platformFeeRenter
+        });
         
         // ตรวจสอบความถูกต้องของการคำนวณ
         if (subtotalRentalFee < 0) {
@@ -132,11 +159,6 @@ const RentalService = {
         }
         
         const totalAmountDue = subtotalRentalFee + securityDeposit + deliveryFee + platformFeeRenter;
-        
-        // ตรวจสอบยอดรวมสุดท้าย
-        if (totalAmountDue < 0) {
-            throw new ApiError(httpStatusCodes.BAD_REQUEST, "Invalid total amount calculation.");
-        }
         
         // const requiresOwnerApproval = product.settings?.requires_approval ?? true; // Example if product has such setting
         const requiresOwnerApproval = true; // Default for now

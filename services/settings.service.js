@@ -15,15 +15,15 @@ const SettingsService = {
                 platformFeeOwnerSetting,
                 deliveryFeeSetting
             ] = await Promise.all([
-                SystemSettingModel.getSetting('platform_fee_percentage', '0'),
-                SystemSettingModel.getSetting('platform_fee_owner_percentage', '0'),
-                SystemSettingModel.getSetting('delivery_fee_base', '0')
+                SystemSettingModel.getSetting('platform_fee_percentage', '0.0'),
+                SystemSettingModel.getSetting('platform_fee_owner_percentage', '0.0'),
+                SystemSettingModel.getSetting('delivery_fee_base', '0.0')
             ]);
 
             return {
-                platform_fee_percentage: parseFloat(platformFeeSetting.setting_value) || 0,
-                platform_fee_owner_percentage: parseFloat(platformFeeOwnerSetting.setting_value) || 0,
-                delivery_fee_base: parseFloat(deliveryFeeSetting.setting_value) || 0
+                platform_fee_percentage: parseFloat(platformFeeSetting.setting_value) || 0.0,
+                platform_fee_owner_percentage: parseFloat(platformFeeOwnerSetting.setting_value) || 0.0,
+                delivery_fee_base: parseFloat(deliveryFeeSetting.setting_value) || 0.0
             };
         } catch (error) {
             throw new ApiError(
@@ -50,13 +50,19 @@ const SettingsService = {
             // ค่าส่ง (เฉพาะเมื่อเลือก delivery)
             const deliveryFee = pickupMethod === 'delivery' ? feeSettings.delivery_fee_base : 0;
             
+            // คำนวณค่าธรรมเนียมรวม (เฉพาะค่าธรรมเนียม ไม่รวมค่าเช่า)
+            const totalEstimatedFees = platformFeeRenter + deliveryFee;
+            
+            // คำนวณยอดรวมทั้งหมด (ค่าเช่า + ค่าธรรมเนียม)
+            const totalAmountEstimate = subtotalRentalFee + totalEstimatedFees;
+            
             return {
                 subtotal_rental_fee: subtotalRentalFee,
                 platform_fee_renter: platformFeeRenter,
                 platform_fee_owner: platformFeeOwner,
                 delivery_fee: deliveryFee,
-                total_estimated_fees: platformFeeRenter + deliveryFee,
-                total_amount_estimate: subtotalRentalFee + platformFeeRenter + deliveryFee
+                total_estimated_fees: totalEstimatedFees,
+                total_amount_estimate: totalAmountEstimate
             };
         } catch (error) {
             throw new ApiError(

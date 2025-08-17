@@ -179,7 +179,10 @@ INSERT INTO admin_users (
 -- ========================================
 
 INSERT INTO system_settings (setting_key, setting_value, description, data_type, is_publicly_readable) VALUES
-('platform_fee_rate', '0.05', 'อัตราค่าธรรมเนียมแพลตฟอร์ม (5%)', 'float', false),
+('platform_fee_percentage', '0.0', 'อัตราค่าธรรมเนียมแพลตฟอร์มสำหรับผู้เช่า (0% - ไม่มีค่าธรรมเนียม)', 'float', true),
+('platform_fee_owner_percentage', '0.0', 'อัตราค่าธรรมเนียมแพลตฟอร์มสำหรับเจ้าของสินค้า (0% - ไม่มีค่าธรรมเนียม)', 'float', true),
+('delivery_fee_base', '0.0', 'ค่าส่งพื้นฐาน (0 บาท - ไม่มีค่าส่ง)', 'float', true),
+('platform_fee_rate', '0.0', 'อัตราค่าธรรมเนียมแพลตฟอร์ม (0% - ไม่มีค่าธรรมเนียม)', 'float', false),
 ('max_rental_days', '30', 'จำนวนวันเช่าสูงสุด', 'integer', true),
 ('min_rental_days', '1', 'จำนวนวันเช่าขั้นต่ำ', 'integer', true),
 ('auto_approve_products', 'false', 'อนุมัติสินค้าอัตโนมัติ', 'boolean', false);
