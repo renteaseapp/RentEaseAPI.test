@@ -4,7 +4,7 @@ import ReviewController from '../controllers/review.controller.js';
 import authenticateJWT from '../middleware/authenticateJWT.js';
 import validateRequest from '../middleware/validateRequest.js';
 import { uploadMultipleFields } from '../middleware/fileUpload.js';
-import { getProductsQuerySchema, getProductReviewsQuerySchema } from '../DTOs/product.dto.js';
+import { getProductsQuerySchema, getProductReviewsQuerySchema, updateProductStatusSchema } from '../DTOs/product.dto.js';
 
 const router = express.Router();
 
@@ -18,6 +18,7 @@ router.get('/top-rented', ProductController.getTopRentedProducts);
 // Product creation and update routes (protected)
 router.post('/', authenticateJWT, uploadMultipleFields([{ name: 'images[]', maxCount: 10 }]), ProductController.createProduct);
 router.put('/:slugOrId', authenticateJWT, uploadMultipleFields([{ name: 'new_images[]', maxCount: 10 }]), ProductController.updateProduct);
+router.put('/:productId/status', authenticateJWT, validateRequest(updateProductStatusSchema, 'body'), ProductController.updateProductStatus);
 
 // Product reviews (public)
 router.get('/:productId/reviews', validateRequest(getProductReviewsQuerySchema, 'query'), ReviewController.getProductReviews);
