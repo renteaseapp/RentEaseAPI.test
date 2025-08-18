@@ -97,3 +97,10 @@ export const deliveryStatusUpdateSchema = Joi.object({
     tracking_number: Joi.string().optional().allow(null, ''),
     carrier_code: Joi.string().optional().allow(null, '')
 });
+
+export const actualPickupTimeSchema = Joi.object({
+    actual_pickup_time: Joi.date().iso().required().messages({
+        'any.required': 'Actual pickup time is required.',
+        'date.base': 'Actual pickup time must be a valid date.'
+    })
+});

@@ -11,7 +11,8 @@ import {
     cancelRentalSchema,
     paymentProofSchema,
     returnProcessSchema,
-    initiateReturnSchema
+    initiateReturnSchema,
+    actualPickupTimeSchema
 } from '../DTOs/rental.dto.js';
 import { initiatePaymentSchema } from '../DTOs/payment.dto.js';
 
@@ -118,6 +119,7 @@ router.post('/:rental_id_or_uid/mark-slip-invalid', RentalController.markSlipInv
 // Renter sets actual pickup time
 router.put(
     '/:rental_id_or_uid/actual-pickup',
+    validateRequest(actualPickupTimeSchema, 'body'),
     RentalController.setActualPickupTime
 );
 
