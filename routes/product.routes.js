@@ -26,6 +26,9 @@ router.get('/:productId/reviews', validateRequest(getProductReviewsQuerySchema, 
 // Product detail route (public) - must come after other specific routes
 router.get('/:slugOrId', ProductController.getProductByIdOrSlug);
 router.get('/:productId/availability/:yearMonth', ProductController.getProductAvailability);
+router.get('/:productId/rentals/:yearMonth', ProductController.getProductRentals);
+router.get('/:productId/rental-count', ProductController.getRentalCountForProduct);
+router.get('/:productId/check-availability-with-buffer', ProductController.checkProductAvailabilityWithBuffer);
 
 // Admin/Maintenance routes (protected)
 router.post('/sync-quantities', authenticateJWT, ProductController.syncProductQuantities);

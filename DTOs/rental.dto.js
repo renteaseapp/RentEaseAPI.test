@@ -16,6 +16,9 @@ export const createRentalSchema = Joi.object({
     }),
     pickup_method: Joi.string().valid(...RENTAL_PICKUP_METHODS).required(),
     
+    // Optional rental type from frontend (will still compute optimal on backend)
+    rental_type: Joi.string().valid('daily', 'weekly', 'monthly').optional(),
+    
     // Conditional validation for delivery address
     delivery_address_id: Joi.when('pickup_method', {
         is: 'delivery',

@@ -35,7 +35,18 @@ const SettingsController = {
             success: true,
             data: estimatedFees
         });
+    }),
+
+    /**
+     * ดึงการตั้งค่าสาธารณะรวมถึง buffer time settings
+     */
+    getPublicSettings: asyncHandler(async (req, res) => {
+        const settings = await SettingsService.getPublicSettings();
+        res.json({
+            success: true,
+            data: settings
+        });
     })
 };
 
-export default SettingsController; 
+export default SettingsController;

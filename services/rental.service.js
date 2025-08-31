@@ -55,8 +55,96 @@ const RentalService = {
         return totalLateFee;
     },
 
+    // ฟังก์ชันคำนวณราคาเช่าตาม rental type (ปรับปรุงให้รองรับการคำนวณที่ถูกต้อง)
+    calculateRentalSubtotal(product, rentalDurationDays, rentalType = 'daily') {
+        const { rental_price_per_day, rental_price_per_week, rental_price_per_month } = product;
+        
+        let total = 0;
+
+        switch (rentalType) {
+            case 'monthly':
+                if (rental_price_per_month) {
+                    // หากผู้ใช้เลือกรายเดือน ให้ใช้ราคารายเดือนเป็นหลัก
+                    // คำนวณจำนวนเดือนจากจำนวนวัน (โดยประมาณ)
+                    const months = Math.ceil(rentalDurationDays / 30);
+                    return months * rental_price_per_month;
+                }
+                break;
+            case 'weekly':
+                if (rental_price_per_week) {
+                    // หากผู้ใช้เลือกรายสัปดาห์ ให้ใช้ราคารายสัปดาห์เป็นหลัก
+                    // คำนวณจำนวนสัปดาห์จากจำนวนวัน
+                    const weeks = Math.ceil(rentalDurationDays / 7);
+                    return weeks * rental_price_per_week;
+                }
+                break;
+            case 'daily':
+            default:
+                return rental_price_per_day * rentalDurationDays;
+        }
+        
+        // Fallback to daily rate if specific rate not available or rentalType not matched
+        return rental_price_per_day * rentalDurationDays;
+    },
+
+    // ฟังก์ชันหาประเภทการเช่าที่ประหยัดที่สุด
+    determineOptimalRentalType(product, rentalDurationDays) {
+        const { rental_price_per_day, rental_price_per_week, rental_price_per_month } = product;
+        
+        let bestType = 'daily';
+        let bestPrice = this.calculateRentalSubtotal(product, rentalDurationDays, 'daily');
+
+        // ตรวจสอบราคารายสัปดาห์
+        if (rental_price_per_week) {
+            const weeklyTotal = this.calculateRentalSubtotal(product, rentalDurationDays, 'weekly');
+            if (weeklyTotal < bestPrice) {
+                bestType = 'weekly';
+                bestPrice = weeklyTotal;
+            }
+        }
+
+        // ตรวจสอบราคารายเดือน
+        if (rental_price_per_month) {
+            const monthlyTotal = this.calculateRentalSubtotal(product, rentalDurationDays, 'monthly');
+            if (monthlyTotal < bestPrice) {
+                bestType = 'monthly';
+                bestPrice = monthlyTotal;
+            }
+        }
+        
+        return { type: bestType, price: bestPrice };
+    },
+
+    // ฟังก์ชันหาประเภทการเช่าที่ประหยัดที่สุด
+    determineOptimalRentalType(product, rentalDurationDays) {
+        const { rental_price_per_day, rental_price_per_week, rental_price_per_month } = product;
+        
+        let bestType = 'daily';
+        let bestPrice = this.calculateRentalSubtotal(product, rentalDurationDays, 'daily');
+
+        // ตรวจสอบราคารายสัปดาห์
+        if (rental_price_per_week) {
+            const weeklyTotal = this.calculateRentalSubtotal(product, rentalDurationDays, 'weekly');
+            if (weeklyTotal < bestPrice) {
+                bestType = 'weekly';
+                bestPrice = weeklyTotal;
+            }
+        }
+
+        // ตรวจสอบราคารายเดือน
+        if (rental_price_per_month) {
+            const monthlyTotal = this.calculateRentalSubtotal(product, rentalDurationDays, 'monthly');
+            if (monthlyTotal < bestPrice) {
+                bestType = 'monthly';
+                bestPrice = monthlyTotal;
+            }
+        }
+        
+        return { type: bestType, price: bestPrice };
+    },
+
     async createRentalRequest(renterId, rentalRequestData) {
-        const { product_id, start_date, end_date, pickup_method, delivery_address_id, notes_from_renter } = rentalRequestData;
+        const { product_id, start_date, end_date, pickup_method, delivery_address_id, notes_from_renter, rental_type } = rentalRequestData;
 
         const product = await ProductModel.findByIdOrSlug(product_id); // Uses forUpdate = false by default
         if (!product || (product.availability_status !== 'available' && product.availability_status !== 'rented_out') || product.admin_approval_status !== 'approved') {
@@ -69,6 +157,18 @@ const RentalService = {
         // ตรวจสอบว่าสินค้ามีจำนวนเพียงพอสำหรับการเช่า (ไม่จองไว้ตอนนี้)
         if (product.quantity_available < 1) {
             throw new ApiError(httpStatusCodes.BAD_REQUEST, "Product is currently out of stock.");
+        }
+
+        // ตรวจสอบความพร้อมของสินค้าพร้อม buffer time
+        const availabilityCheck = await ProductModel.checkAvailabilityWithBuffer(product_id, start_date, end_date);
+        if (!availabilityCheck.available) {
+            const conflictDetails = availabilityCheck.conflicts.map(conflict => 
+                `Rental ${conflict.rental_id} (${conflict.rental_start} to ${conflict.rental_end})`
+            ).join(', ');
+            throw new ApiError(
+                httpStatusCodes.BAD_REQUEST, 
+                `Product is not available for the selected dates due to existing bookings or buffer time requirements. Conflicts: ${conflictDetails}`
+            );
         }
 
         const startDateObj = new Date(start_date);
@@ -107,7 +207,34 @@ const RentalService = {
             validDeliveryAddressId = address.id;
         }
 
-        const subtotalRentalFee = product.rental_price_per_day * rentalDurationDays;
+        // ใช้ประเภทการเช่าที่ผู้ใช้เลือก หรือใช้ optimal หากไม่ได้ระบุ
+        let selectedRentalType = rental_type || 'daily';
+        const optimalRentalInfo = this.determineOptimalRentalType(product, rentalDurationDays);
+        
+        // ตรวจสอบว่าประเภทที่เลือกมีราคากำหนดไว้หรือไม่
+        if (selectedRentalType === 'weekly' && !product.rental_price_per_week) {
+            selectedRentalType = 'daily';
+        }
+        if (selectedRentalType === 'monthly' && !product.rental_price_per_month) {
+            selectedRentalType = 'daily';
+        }
+        
+        const subtotalRentalFee = this.calculateRentalSubtotal(product, rentalDurationDays, selectedRentalType);
+        
+        // Debug logging - แสดงการเปรียบเทียบ
+        console.log('🔍 Backend Rental Service - Pricing Comparison:', {
+            userSelectedType: rental_type,
+            finalSelectedType: selectedRentalType,
+            rentalDurationDays: rentalDurationDays,
+            productDailyPrice: product.rental_price_per_day,
+            productWeeklyPrice: product.rental_price_per_week,
+            productMonthlyPrice: product.rental_price_per_month,
+            calculatedWeeks: selectedRentalType === 'weekly' ? Math.ceil(rentalDurationDays / 7) : null,
+            calculatedMonths: selectedRentalType === 'monthly' ? Math.ceil(rentalDurationDays / 30) : null,
+            selectedSubtotal: subtotalRentalFee,
+            optimalType: optimalRentalInfo.type,
+            optimalSubtotal: optimalRentalInfo.price
+        });
         
         // คำนวณค่าส่ง
         let deliveryFee = 0;
@@ -169,12 +296,15 @@ const RentalService = {
             renter_id: renterId, product_id: product.id, owner_id: product.owner_id,
             start_date, end_date,
             rental_price_per_day_at_booking: product.rental_price_per_day,
+            rental_price_per_week_at_booking: product.rental_price_per_week,
+            rental_price_per_month_at_booking: product.rental_price_per_month,
             security_deposit_at_booking: securityDeposit,
             calculated_subtotal_rental_fee: subtotalRentalFee, delivery_fee: deliveryFee,
             platform_fee_renter: platformFeeRenter, platform_fee_owner: platformFeeOwner, total_amount_due: totalAmountDue,
             pickup_method, return_method: pickup_method === 'delivery' ? 'owner_pickup' : 'self_return',
             delivery_address_id: validDeliveryAddressId, rental_status: initialRentalStatus,
             payment_status: initialPaymentStatus, notes_from_renter,
+            rental_pricing_type_used: selectedRentalType,
             return_condition_status: 'not_yet_returned',
         };
         const rental = await RentalModel.create(rentalPayload);
@@ -536,7 +666,10 @@ const RentalService = {
         let notificationMessage = `ผู้เช่า (${rental.renter.first_name}) ได้เริ่มขั้นตอนการคืนสินค้า '${rental.product.title}'.`;
 
         if (returnDetails.return_method === 'shipping') {
-            updatePayload.return_details = returnDetails.return_details;
+            updatePayload.return_details = {
+                ...returnDetails.return_details,
+                notes: returnDetails.notes
+            };
             notificationMessage += `\n- วิธีการ: ส่งพัสดุ`;
             notificationMessage += `\n- บริษัทขนส่ง: ${returnDetails.return_details.carrier}`;
             notificationMessage += `\n- เลข Tracking: ${returnDetails.return_details.tracking_number}`;
@@ -554,7 +687,10 @@ const RentalService = {
                 notificationMessage += `\n- มีการแนบสลิปการส่ง`;
             }
         } else if (returnDetails.return_method === 'in_person') {
-            updatePayload.return_details = returnDetails.return_details;
+            updatePayload.return_details = {
+                ...returnDetails.return_details,
+                notes: returnDetails.notes
+            };
             notificationMessage += `\n- วิธีการ: นัดรับ`;
             notificationMessage += `\n- สถานที่: ${returnDetails.return_details.location}`;
             notificationMessage += `\n- วันเวลา: ${returnDetails.return_details.return_datetime}`;

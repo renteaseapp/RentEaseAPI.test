@@ -1,6 +1,7 @@
 import supabase from '../db/supabaseClient.js';
 import { ApiError } from '../utils/apiError.js';
 import httpStatusCodes from '../constants/httpStatusCodes.js';
+import { emitQuantityUpdate } from '../server.js';
 
 const ProductModel = {
     async findAll(filters = {}) {
@@ -18,15 +19,71 @@ const ProductModel = {
 
         const offset = (page - 1) * limit;
 
+        // Keyword mapping for Thai/English synonyms
+        const keywordMappings = {
+            'กล้อง': ['camera', 'canon', 'nikon', 'sony', 'fujifilm', 'olympus', 'panasonic', 'mirrorless', 'dslr', 'eos'],
+            'camera': ['กล้อง', 'canon', 'nikon', 'sony', 'fujifilm', 'olympus', 'panasonic', 'mirrorless', 'dslr', 'eos'],
+            'มือถือ': ['phone', 'smartphone', 'mobile', 'iphone', 'samsung', 'xiaomi', 'oppo', 'vivo', 'realme', 'android'],
+            'โทรศัพท์': ['phone', 'smartphone', 'mobile', 'iphone', 'samsung', 'xiaomi', 'oppo', 'vivo', 'realme', 'android'],
+            'คอมพิวเตอร์': ['computer', 'laptop', 'notebook', 'pc', 'macbook', 'dell', 'hp', 'asus', 'acer', 'lenovo'],
+            'พีซี': ['computer', 'laptop', 'notebook', 'pc', 'macbook', 'dell', 'hp', 'asus', 'acer', 'lenovo'],
+            'แท็บเล็ต': ['tablet', 'ipad', 'samsung', 'huawei', 'lenovo', 'android'],
+            'ไอแพด': ['ipad', 'tablet', 'apple'],
+            'เลนส์': ['lens', 'canon', 'nikon', 'sony', 'sigma', 'tamron', 'zeiss'],
+            'ขาตั้ง': ['tripod', 'gimbal', 'stand', 'mount', 'stabilizer'],
+            'ไฟ': ['light', 'flash', 'led', 'softbox', 'studio', 'strobe'],
+            'เสียง': ['audio', 'microphone', 'mic', 'speaker', 'headphone', 'sound'],
+            'เกม': ['game', 'gaming', 'playstation', 'xbox', 'nintendo', 'switch', 'ps5', 'ps4'],
+            'game': ['เกม', 'gaming', 'playstation', 'xbox', 'nintendo', 'switch', 'ps5', 'ps4'],
+            'รถ': ['car', 'vehicle', 'automobile', 'รถยนต์'],
+            'car': ['รถ', 'รถยนต์', 'vehicle', 'automobile'],
+            'จักรยาน': ['bike', 'bicycle', 'cycle', 'จักรยานเสือภูเขา', 'จักรยานเสือหมอบ'],
+            'bike': ['จักรยาน', 'bicycle', 'cycle', 'จักรยานเสือภูเขา', 'จักรยานเสือหมอบ']
+        };
+
+        // Build search conditions
+        let searchConditions = [];
+        if (q) {
+            const lowerQ = q.toLowerCase().trim();
+            
+            // Direct search conditions
+            searchConditions.push(`title.ilike.%${q}%`);
+            searchConditions.push(`description.ilike.%${q}%`);
+            
+            // Check for keyword mapping matches
+            let foundKeywordMatch = false;
+            Object.keys(keywordMappings).forEach(keyword => {
+                if (lowerQ.includes(keyword.toLowerCase())) {
+                    foundKeywordMatch = true;
+                    keywordMappings[keyword].forEach(synonym => {
+                        searchConditions.push(`title.ilike.%${synonym}%`);
+                        searchConditions.push(`description.ilike.%${synonym}%`);
+                    });
+                }
+            });
+            
+            // Only add partial word matching if no specific keyword mapping was found
+            if (!foundKeywordMatch) {
+                const fuzzyKeywords = q.split(' ').filter(word => word.length > 2);
+                fuzzyKeywords.forEach(word => {
+                    searchConditions.push(`title.ilike.%${word}%`);
+                    searchConditions.push(`description.ilike.%${word}%`);
+                });
+            }
+        }
+
         // ดึงจำนวนทั้งหมดก่อน
         let countQuery = supabase
             .from('products')
             .select('id', { count: 'exact', head: true })
             .eq('admin_approval_status', 'approved')
-            .eq('availability_status', 'available')
+            .in('availability_status', ['available', 'rented_out'])
             .is('deleted_at', null);
         if (featured) countQuery = countQuery.eq('is_featured', true);
-        if (q) countQuery = countQuery.or(`title.ilike.%${q}%,description.ilike.%${q}%`);
+        if (searchConditions.length > 0) {
+            // Use OR only for search conditions, but AND with other filters
+            countQuery = countQuery.or(searchConditions.join(','));
+        }
         if (category_id) countQuery = countQuery.eq('category_id', category_id);
         if (province_ids && province_ids.length > 0) countQuery = countQuery.in('province_id', province_ids);
         if (min_price !== undefined) countQuery = countQuery.gte('rental_price_per_day', min_price);
@@ -46,19 +103,20 @@ const ProductModel = {
         let query = supabase
             .from('products')
             .select(`
-                id, title, slug, rental_price_per_day, average_rating, total_reviews, view_count,
+                id, title, slug, rental_price_per_day, average_rating, total_reviews, view_count, quantity_available, availability_status,
                 province:provinces (id, name_th),
                 category:categories (id, name),
                 primary_image:product_images (image_url)
             `, { count: 'exact' })
             .eq('admin_approval_status', 'approved')
-            .eq('availability_status', 'available')
+            .in('availability_status', ['available', 'rented_out'])
             .is('deleted_at', null);
         if (featured) {
             query = query.eq('is_featured', true);
         }
-        if (q) {
-            query = query.or(`title.ilike.%${q}%,description.ilike.%${q}%`);
+        if (searchConditions.length > 0) {
+            // Use OR only for search conditions, but AND with other filters
+            query = query.or(searchConditions.join(','));
         }
         if (category_id) {
             query = query.eq('category_id', category_id);
@@ -166,6 +224,18 @@ const ProductModel = {
         const monthStart = new Date(year, month - 1, 1).toISOString().split('T')[0];
         const monthEnd = new Date(year, month, 0).toISOString().split('T')[0];
 
+        // Get buffer time settings
+        const SystemSettingModel = (await import('./systemSetting.model.js')).default;
+        const [enableBufferSetting, deliveryBufferSetting, returnBufferSetting] = await Promise.all([
+            SystemSettingModel.getSetting('enable_buffer_time', 'true'),
+            SystemSettingModel.getSetting('delivery_buffer_days', '1'),
+            SystemSettingModel.getSetting('return_buffer_days', '1')
+        ]);
+
+        const enableBuffer = enableBufferSetting.setting_value === 'true';
+        const deliveryBufferDays = parseInt(deliveryBufferSetting.setting_value) || 1;
+        const returnBufferDays = parseInt(returnBufferSetting.setting_value) || 1;
+
         const { data, error } = await supabase
             .from('rentals')
             .select('start_date, end_date')
@@ -182,10 +252,19 @@ const ProductModel = {
         const bookedDates = [];
         if (data) {
             data.forEach(rental => {
-                let currentDate = new Date(rental.start_date + 'T00:00:00Z');
-                const endDate = new Date(rental.end_date + 'T00:00:00Z');
+                // Calculate buffer dates
+                let bufferStartDate = new Date(rental.start_date + 'T00:00:00Z');
+                let bufferEndDate = new Date(rental.end_date + 'T00:00:00Z');
+                
+                if (enableBuffer) {
+                    // Add delivery buffer before start date
+                    bufferStartDate.setUTCDate(bufferStartDate.getUTCDate() - deliveryBufferDays);
+                    // Add return buffer after end date
+                    bufferEndDate.setUTCDate(bufferEndDate.getUTCDate() + returnBufferDays);
+                }
 
-                while (currentDate <= endDate) {
+                let currentDate = new Date(bufferStartDate);
+                while (currentDate <= bufferEndDate) {
                     const currentDateStr = currentDate.toISOString().split('T')[0];
                     if (currentDateStr >= monthStart && currentDateStr <= monthEnd && !bookedDates.includes(currentDateStr)) {
                         bookedDates.push(currentDateStr);
@@ -195,6 +274,195 @@ const ProductModel = {
             });
         }
         return bookedDates.sort();
+    },
+
+    async checkAvailabilityWithBuffer(productId, startDate, endDate) {
+        // Get product information first
+        const { data: product, error: productError } = await supabase
+            .from('products')
+            .select('id, quantity, quantity_available, availability_status, title')
+            .eq('id', productId)
+            .eq('admin_approval_status', 'approved')
+            .is('deleted_at', null)
+            .single();
+
+        if (productError) {
+            console.error('Error fetching product:', productError);
+            throw productError;
+        }
+
+        if (!product) {
+            return {
+                available: false,
+                reason: 'Product not found or not approved',
+                conflicts: [],
+                buffer_settings: {}
+            };
+        }
+
+        // Check product status
+        if (product.availability_status !== 'available' && product.availability_status !== 'rented_out') {
+            return {
+                available: false,
+                reason: `Product is currently ${product.availability_status}`,
+                conflicts: [],
+                buffer_settings: {},
+                product_info: {
+                    quantity: product.quantity,
+                    quantity_available: product.quantity_available,
+                    status: product.availability_status
+                }
+            };
+        }
+
+        // Check if there's available quantity
+        if (product.quantity_available < 1) {
+            return {
+                available: false,
+                reason: `No available quantity. Available: ${product.quantity_available}, Total: ${product.quantity}`,
+                conflicts: [],
+                buffer_settings: {},
+                product_info: {
+                    quantity: product.quantity,
+                    quantity_available: product.quantity_available,
+                    status: product.availability_status
+                }
+            };
+        }
+
+        // Get buffer time settings
+        const SystemSettingModel = (await import('./systemSetting.model.js')).default;
+        const [enableBufferSetting, deliveryBufferSetting, returnBufferSetting] = await Promise.all([
+            SystemSettingModel.getSetting('enable_buffer_time', 'true'),
+            SystemSettingModel.getSetting('delivery_buffer_days', '1'),
+            SystemSettingModel.getSetting('return_buffer_days', '1')
+        ]);
+
+        const enableBuffer = enableBufferSetting.setting_value === 'true';
+        const deliveryBufferDays = parseInt(deliveryBufferSetting.setting_value) || 1;
+        const returnBufferDays = parseInt(returnBufferSetting.setting_value) || 1;
+
+        // Ensure dates are handled correctly whether they are strings or Date objects
+        const start = typeof startDate === 'string' ? startDate : startDate.toISOString().split('T')[0];
+        const end = typeof endDate === 'string' ? endDate : endDate.toISOString().split('T')[0];
+
+        // Calculate the actual date range we need to check (including buffer)
+        let checkStartDate = new Date(start + 'T00:00:00Z');
+        let checkEndDate = new Date(end + 'T00:00:00Z');
+        
+        if (enableBuffer) {
+            // Extend the check range to include buffer time
+            checkStartDate.setUTCDate(checkStartDate.getUTCDate() - deliveryBufferDays);
+            checkEndDate.setUTCDate(checkEndDate.getUTCDate() + returnBufferDays);
+        }
+
+        const checkStartDateStr = checkStartDate.toISOString().split('T')[0];
+        const checkEndDateStr = checkEndDate.toISOString().split('T')[0];
+
+        // Find any conflicting rentals
+        const { data, error } = await supabase
+            .from('rentals')
+            .select('id, start_date, end_date, rental_status')
+            .eq('product_id', productId)
+            .in('rental_status', ['pending_owner_approval', 'pending_payment', 'confirmed', 'active'])
+            .or(`and(start_date.lte.${checkEndDateStr},end_date.gte.${checkStartDateStr})`);
+
+        if (error) {
+            console.error("Error checking product availability:", error);
+            throw error;
+        }
+
+        // Count overlapping rentals to check if we have enough quantity
+        const overlappingRentals = [];
+        if (data && data.length > 0) {
+            data.forEach(rental => {
+                let rentalBufferStart = new Date(rental.start_date + 'T00:00:00Z');
+                let rentalBufferEnd = new Date(rental.end_date + 'T00:00:00Z');
+                
+                if (enableBuffer) {
+                    rentalBufferStart.setUTCDate(rentalBufferStart.getUTCDate() - deliveryBufferDays);
+                    rentalBufferEnd.setUTCDate(rentalBufferEnd.getUTCDate() + returnBufferDays);
+                }
+
+                const requestStart = new Date(start + 'T00:00:00Z');
+                const requestEnd = new Date(end + 'T00:00:00Z');
+
+                // Check if the requested dates overlap with existing rental + buffer
+                if (requestStart <= rentalBufferEnd && requestEnd >= rentalBufferStart) {
+                    overlappingRentals.push({
+                        rental_id: rental.id,
+                        rental_start: rental.start_date,
+                        rental_end: rental.end_date,
+                        rental_status: rental.rental_status,
+                        buffer_start: rentalBufferStart.toISOString().split('T')[0],
+                        buffer_end: rentalBufferEnd.toISOString().split('T')[0]
+                    });
+                }
+            });
+        }
+
+        // Check if we have enough available quantity considering overlapping rentals
+        const overlappingRentalCount = overlappingRentals.length;
+        const availableForNewRental = product.quantity - overlappingRentalCount;
+        const isAvailable = availableForNewRental > 0;
+
+        return {
+            available: isAvailable,
+            reason: isAvailable ? null : `Not enough quantity available. Total: ${product.quantity}, Overlapping rentals: ${overlappingRentalCount}, Available for new rental: ${availableForNewRental}`,
+            conflicts: overlappingRentals,
+            buffer_settings: {
+                enabled: enableBuffer,
+                delivery_buffer_days: deliveryBufferDays,
+                return_buffer_days: returnBufferDays
+            },
+            product_info: {
+                quantity: product.quantity,
+                quantity_available: product.quantity_available,
+                status: product.availability_status,
+                overlapping_rentals: overlappingRentalCount,
+                available_for_new_rental: availableForNewRental
+            }
+        };
+    },
+
+    async getProductRentals(productId, yearMonth) {
+        const [year, month] = yearMonth.split('-').map(Number);
+        const monthStart = new Date(year, month - 1, 1).toISOString().split('T')[0];
+        const monthEnd = new Date(year, month, 0).toISOString().split('T')[0];
+
+        const { data, error } = await supabase
+            .from('rentals')
+            .select(`
+                id,
+                start_date,
+                end_date,
+                rental_status,
+                total_amount_due,
+                users!fk_rentals_renter(
+                    id,
+                    first_name,
+                    last_name,
+                    email
+                )
+            `)
+            .eq('product_id', productId)
+            .in('rental_status', ['pending_owner_approval', 'pending_payment', 'confirmed', 'active'])
+            .lte('start_date', monthEnd)
+            .gte('end_date', monthStart)
+            .order('start_date', { ascending: true });
+
+        if (error) {
+            console.error("Error fetching product rentals:", error);
+            throw error;
+        }
+
+        // เพิ่ม quantity = 1 เนื่องจากระบบเช่าได้ทีละชิ้น
+        const rentalsWithQuantity = (data || []).map(rental => ({
+            ...rental,
+            quantity: 1
+        }));
+
+        return rentalsWithQuantity;
     },
 
     async create(productData) {
@@ -340,6 +608,21 @@ const ProductModel = {
     },
 
     // ดึงสินค้ายอดนิยมจากยอดการเช่า (top N)
+    async getRentalCountForProduct(productId) {
+        const { data: rentals, error: rentalError } = await supabase
+            .from('rentals')
+            .select('id')
+            .eq('product_id', productId)
+            .eq('rental_status', 'completed');
+        
+        if (rentalError) {
+            console.error('Error fetching rental count for product:', rentalError);
+            throw rentalError;
+        }
+        
+        return (rentals || []).length;
+    },
+
     async getTopRentedProducts(limit = 5) {
         // 1. ดึง rentals ที่ completed และ product_id ไม่เป็น null
         const { data: rentals, error: rentalError } = await supabase
@@ -368,13 +651,13 @@ const ProductModel = {
             const { data: fallbackProducts, error: fallbackError } = await supabase
                 .from('products')
                 .select(`
-                    id, title, slug, rental_price_per_day, average_rating, total_reviews, view_count,
+                    id, title, slug, rental_price_per_day, average_rating, total_reviews, view_count, quantity_available, availability_status,
                     province:provinces (id, name_th),
                     category:categories (id, name),
                     primary_image:product_images (image_url)
                 `)
                 .eq('admin_approval_status', 'approved')
-                .eq('availability_status', 'available')
+                .in('availability_status', ['available', 'rented_out'])
                 .is('deleted_at', null)
                 .eq('primary_image.is_primary', true)
                 .order('created_at', { ascending: false })
@@ -396,14 +679,14 @@ const ProductModel = {
         const { data: products, error: productError } = await supabase
             .from('products')
             .select(`
-                id, title, slug, rental_price_per_day, average_rating, total_reviews, view_count,
+                id, title, slug, rental_price_per_day, average_rating, total_reviews, view_count, quantity_available, availability_status,
                 province:provinces (id, name_th),
                 category:categories (id, name),
                 primary_image:product_images (image_url)
             `)
             .in('id', topProductIds)
             .eq('admin_approval_status', 'approved')
-            .eq('availability_status', 'available')
+            .in('availability_status', ['available', 'rented_out'])
             .is('deleted_at', null);
         if (productError) {
             console.error('Error fetching products for top rented:', productError);
@@ -478,6 +761,21 @@ const ProductModel = {
             }
 
             console.log(`Product ${productId} quantity updated: ${currentProduct.quantity_available} → ${finalQuantityAvailable}, status: ${currentProduct.availability_status} → ${newAvailabilityStatus}`);
+            
+            // Emit real-time quantity update via WebSocket
+            try {
+                emitQuantityUpdate(productId, {
+                    product_id: productId,
+                    quantity_available: finalQuantityAvailable,
+                    quantity_reserved: currentProduct.quantity - finalQuantityAvailable,
+                    availability_status: newAvailabilityStatus,
+                    old_quantity_available: currentProduct.quantity_available,
+                    old_availability_status: currentProduct.availability_status
+                });
+            } catch (socketError) {
+                console.error('Error emitting quantity update:', socketError);
+                // Don't throw error as socket emission failure shouldn't break the main operation
+            }
             
             return updatedProduct;
 
@@ -626,4 +924,4 @@ const ProductModel = {
     }
 };
 
-export default ProductModel; 
+export default ProductModel;

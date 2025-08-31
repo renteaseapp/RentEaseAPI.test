@@ -63,6 +63,11 @@ const ProductService = {
         return { booked_dates: bookedDates };
     },
 
+    async getProductRentals(productId, yearMonth) {
+        const rentals = await ProductModel.getProductRentals(productId, yearMonth);
+        return rentals;
+    },
+
     async getProductReviews(productId, queryParams) {
         const { reviews, total } = await ReviewModel.findByProductId(productId, queryParams);
         return {
@@ -521,9 +526,13 @@ const ProductService = {
     },
 
     // ดึงสินค้ายอดนิยมจากยอดการเช่า (top N)
+    async getRentalCountForProduct(productId) {
+        return await ProductModel.getRentalCountForProduct(productId);
+    },
+
     async getTopRentedProducts(limit = 5) {
         return await ProductModel.getTopRentedProducts(limit);
     }
 };
 
-export default ProductService; 
+export default ProductService;

@@ -6,5 +6,6 @@ const router = express.Router();
 // Public endpoints for fee settings (no authentication required)
 router.get('/fee-settings', settingsController.getPublicFeeSettings);
 router.post('/calculate-fees', settingsController.calculateEstimatedFees);
+router.get('/public', settingsController.getPublicSettings);
 
-export default router; 
+export default router;

@@ -70,7 +70,38 @@ const SettingsService = {
                 "Failed to calculate estimated fees"
             );
         }
+    },
+
+    /**
+     * ดึงการตั้งค่าสาธารณะรวมถึง buffer time settings
+     * @returns {Object} - ข้อมูลการตั้งค่าต่างๆ
+     */
+    async getPublicSettings() {
+        try {
+            const [
+                bufferEnabledSetting,
+                deliveryBufferSetting,
+                returnBufferSetting
+            ] = await Promise.all([
+                SystemSettingModel.getSetting('buffer_enabled', 'true'),
+                SystemSettingModel.getSetting('delivery_buffer_days', '1'),
+                SystemSettingModel.getSetting('return_buffer_days', '1')
+            ]);
+
+            return {
+                buffer_settings: {
+                    enabled: bufferEnabledSetting.setting_value === 'true',
+                    delivery_buffer_days: parseInt(deliveryBufferSetting.setting_value) || 1,
+                    return_buffer_days: parseInt(returnBufferSetting.setting_value) || 1
+                }
+            };
+        } catch (error) {
+            throw new ApiError(
+                httpStatusCodes.INTERNAL_SERVER_ERROR,
+                "Failed to retrieve public settings"
+            );
+        }
     }
 };
 
-export default SettingsService; 
+export default SettingsService;

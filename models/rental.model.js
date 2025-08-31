@@ -21,7 +21,7 @@ const RentalModel = {
             })
             .select(`
                 *,
-                product:products(title, slug, primary_image:product_images(image_url)),
+                product:products(title, slug, latitude, longitude, primary_image:product_images(image_url)),
                 renter:users!fk_rentals_renter(first_name, email),
                 owner:users!fk_rentals_owner(first_name, email),
                 delivery_address:user_addresses(*, province:provinces (id, name_th))
@@ -57,7 +57,7 @@ const RentalModel = {
             .from('rentals')
             .select(`
                 *,
-                product:products(title, slug, primary_image:product_images(image_url)),
+                product:products(title, slug, latitude, longitude, primary_image:product_images(image_url)),
                 renter:users!fk_rentals_renter(first_name, email),
                 owner:users!fk_rentals_owner(first_name, email),
                 delivery_address:user_addresses(*, province:provinces (id, name_th))
@@ -97,7 +97,7 @@ const RentalModel = {
             .from('rentals')
             .select(`
                 *,
-                product:products(title, slug, primary_image:product_images(image_url)),
+                product:products(title, slug, latitude, longitude, primary_image:product_images(image_url)),
                 renter:users!fk_rentals_renter(first_name, email),
                 owner:users!fk_rentals_owner(first_name, email),
                 delivery_address:user_addresses(*, province:provinces (id, name_th))
@@ -179,7 +179,7 @@ const RentalModel = {
             .eq('id', rentalId)
             .select(`
                 *,
-                product:products(title, slug, primary_image:product_images(image_url)),
+                product:products(title, slug, latitude, longitude, primary_image:product_images(image_url)),
                 renter:users!fk_rentals_renter(first_name, email),
                 owner:users!fk_rentals_owner(first_name, email),
                 delivery_address:user_addresses(*, province:provinces (id, name_th))
@@ -226,4 +226,4 @@ const RentalModel = {
     async updateStatus(rentalId, statusData, userId, userRole = 'system') { /* ... For Day 4 ... */ }
 };
 
-export default RentalModel; 
+export default RentalModel;

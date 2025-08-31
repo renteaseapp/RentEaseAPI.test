@@ -27,12 +27,48 @@ const ProductController = {
     }),
 
     getProductAvailability: asyncHandler(async (req, res) => {
-        const { productId } = req.params;
-        const { month } = req.query;
+        const { productId, yearMonth } = req.params;
 
-        const availability = await ProductService.getProductAvailability(productId, month);
+        const availability = await ProductService.getProductAvailability(productId, yearMonth);
         res.status(httpStatusCodes.OK).json(
             new ApiResponse(httpStatusCodes.OK, availability)
+        );
+    }),
+
+    getProductRentals: asyncHandler(async (req, res) => {
+        const { productId, yearMonth } = req.params;
+
+        const rentals = await ProductService.getProductRentals(productId, yearMonth);
+        res.status(httpStatusCodes.OK).json(
+            new ApiResponse(httpStatusCodes.OK, rentals)
+        );
+    }),
+
+    checkProductAvailabilityWithBuffer: asyncHandler(async (req, res) => {
+        const { productId } = req.params;
+        const {
+            startDate: camelStart,
+            endDate: camelEnd,
+            start_date: snakeStart,
+            end_date: snakeEnd,
+        } = req.query;
+
+        const startDate = camelStart || snakeStart;
+        const endDate = camelEnd || snakeEnd;
+
+        // Validate required parameters
+        if (!startDate || !endDate) {
+            throw new ApiError(httpStatusCodes.BAD_REQUEST, 'start_date and end_date are required');
+        }
+
+        const result = await ProductModel.checkAvailabilityWithBuffer(
+            parseInt(productId, 10),
+            String(startDate),
+            String(endDate)
+        );
+
+        res.status(httpStatusCodes.OK).json(
+            new ApiResponse(httpStatusCodes.OK, result)
         );
     }),
 
@@ -168,6 +204,14 @@ const ProductController = {
         );
     }),
 
+    getRentalCountForProduct: asyncHandler(async (req, res) => {
+        const { productId } = req.params;
+        const rentalCount = await ProductService.getRentalCountForProduct(parseInt(productId, 10));
+        res.status(httpStatusCodes.OK).json(
+            new ApiResponse(httpStatusCodes.OK, { rental_count: rentalCount }, 'Product rental count')
+        );
+    }),
+
     getTopRentedProducts: asyncHandler(async (req, res) => {
         const limit = parseInt(req.query.limit, 10) || 5;
         const products = await ProductService.getTopRentedProducts(limit);
@@ -204,4 +248,4 @@ const ProductController = {
     })
 };
 
-export default ProductController; 
+export default ProductController;
