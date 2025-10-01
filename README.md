@@ -255,13 +255,13 @@ npm run setup:data      # Insert initial data only
 #### 1. ตรวจสอบ Server Status
 
 ```bash
-curl http://localhost:3001/api/health
+curl http://localhost:65019/api/health
 ```
 
 #### 2. ตรวจสอบ Database Connection
 
 ```bash
-curl http://localhost:3001/api/provinces
+curl http://localhost:65019/api/provinces
 ```
 
 #### 3. ตรวจสอบ Storage Buckets
@@ -278,7 +278,7 @@ curl http://localhost:3001/api/provinces
 ### 🔗 Base URL
 
 ```
-Development: http://localhost:3001/api
+Development: http://localhost:65019/api
 Production:  https://your-domain.com/api
 ```
 
@@ -525,7 +525,7 @@ if (!user) {
 npm run dev
 
 # Manual testing
-curl -X GET http://localhost:3001/api/health
+curl -X GET http://localhost:65019/api/health
 ```
 
 ### 🔍 Debugging

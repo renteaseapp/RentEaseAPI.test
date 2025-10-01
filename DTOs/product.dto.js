@@ -47,7 +47,11 @@ export const getProductsQuerySchema = paginationSchema.keys({ // Inherit paginat
             return helpers.error('any.invalid', { message: 'remove_image_ids must be a comma-separated list of positive integers' });
         }
         return ids;
-    }, 'Comma-separated positive integers').optional()
+    }, 'Comma-separated positive integers').optional(),
+    // Location-based search parameters
+    lat: Joi.number().precision(8).min(-90).max(90).optional(),
+    lng: Joi.number().precision(8).min(-180).max(180).optional(),
+    radius_km: Joi.number().precision(2).min(1).max(500).optional().default(50)
 });
 
 export const getProductReviewsQuerySchema = paginationSchema.keys({

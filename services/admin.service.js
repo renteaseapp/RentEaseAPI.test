@@ -5,6 +5,7 @@ import { comparePassword } from '../utils/password.utils.js';
 import httpStatusCodes from '../constants/httpStatusCodes.js';
 import { ApiError } from '../utils/apiError.js';
 import AdminLogger from '../utils/adminLogger.js';
+import { emitUserUpdate } from '../server.js';
 
 // Login
 async function login(email_or_username, password) {
@@ -43,7 +44,7 @@ async function getAllUsers({ page = 1, limit = 10, filters = {} }) {
   const offset = (page - 1) * limit;
   const { data, error, count } = await supabase
     .from('users')
-    .select(`id, username, email, first_name, last_name, phone_number, profile_picture_url, email_verified_at, last_login_at, is_active, address_line1, address_line2, city, province_id, postal_code, id_verification_status, id_verification_notes, id_document_type, id_document_number, id_document_url, id_document_back_url, id_selfie_url, created_at, updated_at, deleted_at` , { count: 'exact' })
+    .select(`id, username, email, first_name, last_name, phone_number, profile_picture_url, email_verified_at, last_login_at, is_active, address_line1, address_line2, city, province_id, postal_code, id_verification_status, id_verification_notes, id_document_type, id_document_number, id_document_url, id_document_back_url, id_selfie_url, registration_ip, created_at, updated_at, deleted_at` , { count: 'exact' })
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1);
   if (error) throw error;
@@ -62,7 +63,7 @@ async function getAllUsers({ page = 1, limit = 10, filters = {} }) {
 async function getUserById(id) {
   const { data, error } = await supabase
     .from('users')
-    .select(`id, username, email, first_name, last_name, phone_number, profile_picture_url, email_verified_at, last_login_at, is_active, address_line1, address_line2, city, province_id, postal_code, id_verification_status, id_verification_notes, id_document_type, id_document_number, id_document_url, id_document_back_url, id_selfie_url, created_at, updated_at, deleted_at`)
+    .select(`id, username, email, first_name, last_name, phone_number, profile_picture_url, email_verified_at, last_login_at, is_active, address_line1, address_line2, city, province_id, postal_code, id_verification_status, id_verification_notes, id_document_type, id_document_number, id_document_url, id_document_back_url, id_selfie_url, registration_ip, created_at, updated_at, deleted_at`)
     .eq('id', Number(id))
     .single();
   if (error) throw error;
@@ -91,6 +92,11 @@ async function banUser(id, adminUserId = null, req = null) {
       reason: 'Admin action'
     }, req);
   }
+
+  // Emit real-time update to user
+  if (result.success && result.data) {
+    emitUserUpdate(Number(id), result.data);
+  }
   
   return result;
 }
@@ -103,6 +109,11 @@ async function unbanUser(id, adminUserId = null, req = null) {
       action: 'User unbanned',
       reason: 'Admin action'
     }, req);
+  }
+
+  // Emit real-time update to user
+  if (result.success && result.data) {
+    emitUserUpdate(Number(id), result.data);
   }
   
   return result;
@@ -654,4 +665,4 @@ export default {
   getAllProducts, approveProduct, getAllCategories, createCategory, updateCategory, deleteCategory,
   getSettings, updateSettings,
   getProductReport, getAdminLogs
-}; 
+};

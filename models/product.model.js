@@ -5,6 +5,11 @@ import { emitQuantityUpdate } from '../server.js';
 
 const ProductModel = {
     async findAll(filters = {}) {
+        // Parse location parameters to ensure they are numbers
+        let parsedLat = filters.lat !== undefined ? parseFloat(filters.lat) : undefined;
+        let parsedLng = filters.lng !== undefined ? parseFloat(filters.lng) : undefined;
+        let parsedRadiusKm = filters.radius_km !== undefined ? parseFloat(filters.radius_km) : 50;
+        
         const {
             q,
             featured,
@@ -79,6 +84,7 @@ const ProductModel = {
             .eq('admin_approval_status', 'approved')
             .in('availability_status', ['available', 'rented_out'])
             .is('deleted_at', null);
+            
         if (featured) countQuery = countQuery.eq('is_featured', true);
         if (searchConditions.length > 0) {
             // Use OR only for search conditions, but AND with other filters
@@ -88,6 +94,20 @@ const ProductModel = {
         if (province_ids && province_ids.length > 0) countQuery = countQuery.in('province_id', province_ids);
         if (min_price !== undefined) countQuery = countQuery.gte('rental_price_per_day', min_price);
         if (max_price !== undefined) countQuery = countQuery.lte('rental_price_per_day', max_price);
+        
+        // Add location-based filtering if lat/lng are provided
+        if (parsedLat !== undefined && parsedLng !== undefined) {
+            console.log('Location-based search parameters:', { lat: parsedLat, lng: parsedLng, radius_km: parsedRadiusKm });
+            // Calculate bounding box for initial filtering
+            const latDiff = parsedRadiusKm / 111.045; // Approximate km per degree latitude
+            const lngDiff = parsedRadiusKm / (111.045 * Math.cos(parsedLat * Math.PI / 180)); // Adjust for longitude
+            
+            countQuery = countQuery
+                .gte('latitude', parsedLat - latDiff)
+                .lte('latitude', parsedLat + latDiff)
+                .gte('longitude', parsedLng - lngDiff)
+                .lte('longitude', parsedLng + lngDiff);
+        }
         
         const { count: total, error: countError } = await countQuery;
         if (countError) {
@@ -131,6 +151,22 @@ const ProductModel = {
             query = query.lte('rental_price_per_day', max_price);
         }
 
+        // Add location-based filtering if lat/lng are provided
+        if (parsedLat !== undefined && parsedLng !== undefined) {
+            console.log('Adding location-based filtering to query');
+            // Calculate bounding box for initial filtering
+            const latDiff = parsedRadiusKm / 111.045; // Approximate km per degree latitude
+            const lngDiff = parsedRadiusKm / (111.045 * Math.cos(parsedLat * Math.PI / 180)); // Adjust for longitude
+            
+            query = query
+                .gte('latitude', parsedLat - latDiff)
+                .lte('latitude', parsedLat + latDiff)
+                .gte('longitude', parsedLng - lngDiff)
+                .lte('longitude', parsedLng + lngDiff)
+                // Order by distance (closest first)
+                .order(`latitude`, { ascending: true });
+        }
+
         query = query.eq('primary_image.is_primary', true);
 
         const [sortFieldDb, sortOrderDb] = sort.split('_');
@@ -156,13 +192,49 @@ const ProductModel = {
             throw error;
         }
 
-        const products = data.map(p => ({
+        // If using location-based search, calculate actual distances and filter by radius
+        let products = data;
+        if (parsedLat !== undefined && parsedLng !== undefined) {
+            console.log('Calculating distances for', data.length, 'products');
+            products = data.map(p => {
+                // Calculate distance using Haversine formula
+                if (p.latitude && p.longitude) {
+                    const distance = this.calculateDistance(parsedLat, parsedLng, p.latitude, p.longitude);
+                    return { ...p, distance };
+                }
+                return { ...p, distance: null };
+            })
+            // Filter by actual radius
+            .filter(p => p.distance === null || p.distance <= parsedRadiusKm)
+            // Sort by distance
+            .sort((a, b) => {
+                if (a.distance === null && b.distance === null) return 0;
+                if (a.distance === null) return 1;
+                if (b.distance === null) return -1;
+                return a.distance - b.distance;
+            });
+        }
+
+        products = products.map(p => ({
             ...p,
             primary_image: p.primary_image && p.primary_image.length > 0 ? p.primary_image[0] : { image_url: null },
             category: p.category || null
         }));
 
         return { products, total };
+    },
+
+    // Haversine formula to calculate distance between two points
+    calculateDistance(lat1, lon1, lat2, lon2) {
+        const R = 6371; // Earth radius in km
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = 
+            Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+            Math.sin(dLon/2) * Math.sin(dLon/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        return R * c; // Distance in km
     },
 
     async findByIdOrSlug(identifier) {

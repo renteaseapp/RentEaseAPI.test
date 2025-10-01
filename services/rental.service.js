@@ -115,34 +115,6 @@ const RentalService = {
         return { type: bestType, price: bestPrice };
     },
 
-    // ฟังก์ชันหาประเภทการเช่าที่ประหยัดที่สุด
-    determineOptimalRentalType(product, rentalDurationDays) {
-        const { rental_price_per_day, rental_price_per_week, rental_price_per_month } = product;
-        
-        let bestType = 'daily';
-        let bestPrice = this.calculateRentalSubtotal(product, rentalDurationDays, 'daily');
-
-        // ตรวจสอบราคารายสัปดาห์
-        if (rental_price_per_week) {
-            const weeklyTotal = this.calculateRentalSubtotal(product, rentalDurationDays, 'weekly');
-            if (weeklyTotal < bestPrice) {
-                bestType = 'weekly';
-                bestPrice = weeklyTotal;
-            }
-        }
-
-        // ตรวจสอบราคารายเดือน
-        if (rental_price_per_month) {
-            const monthlyTotal = this.calculateRentalSubtotal(product, rentalDurationDays, 'monthly');
-            if (monthlyTotal < bestPrice) {
-                bestType = 'monthly';
-                bestPrice = monthlyTotal;
-            }
-        }
-        
-        return { type: bestType, price: bestPrice };
-    },
-
     async createRentalRequest(renterId, rentalRequestData) {
         const { product_id, start_date, end_date, pickup_method, delivery_address_id, notes_from_renter, rental_type } = rentalRequestData;
 
@@ -316,7 +288,8 @@ const RentalService = {
         emitQuantityUpdate(product.id, {
             product_id: product.id,
             quantity_available: product.quantity_available - 1,
-            quantity_reserved: product.quantity_reserved + 1
+            quantity_reserved: product.quantity_reserved + 1,
+            availability_status: product.availability_status
         });
         
         // แจ้งเตือน owner ว่ามีคำขอเช่าใหม่
