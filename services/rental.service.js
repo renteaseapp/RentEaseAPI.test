@@ -9,7 +9,7 @@ import { ApiError } from '../utils/apiError.js';
 import httpStatusCodes from '../constants/httpStatusCodes.js';
 import NotificationService from './notification.service.js';
 import supabase from '../db/supabaseClient.js';
-import { getCurrentDateISO, formatDate, startOfDay, endOfDay } from '../utils/timezoneUtils.js';
+import { getCurrentDateISO, formatDate, startOfDay, endOfDay, diffInDays } from '../utils/timezoneUtils.js';
 
 // Import realtime event emitters
 import { 
@@ -145,8 +145,9 @@ const RentalService = {
 
         const startDateObj = new Date(start_date);
         const endDateObj = new Date(end_date);
-        // คำนวณวันเช่าให้ตรงกับ Frontend (ไม่ต้องบวก 1)
-        const rentalDurationDays = Math.ceil((endDateObj - startDateObj) / (1000 * 60 * 60 * 24));
+        // คำนวณวันเช่าแบบ inclusive (รวมทั้งวันเริ่มต้นและวันสิ้นสุด) ให้ตรงกับ Frontend และ Calendar
+        // ใช้ diffInDays utility function แทนการคำนวณแบบ manual เพื่อความแม่นยำ
+        const rentalDurationDays = diffInDays(start_date, end_date) + 1;
         
         // Debug logging
         console.log('🔍 Backend Rental Service - Date Calculation:', {
@@ -155,7 +156,7 @@ const RentalService = {
             startDateObj: startDateObj.toISOString(),
             endDateObj: endDateObj.toISOString(),
             timeDiffMs: endDateObj - startDateObj,
-            timeDiffDays: (endDateObj - startDateObj) / (1000 * 60 * 60 * 24),
+            timeDiffDays: diffInDays(start_date, end_date),
             rentalDurationDays,
             productRentalPrice: product.rental_price_per_day
         });

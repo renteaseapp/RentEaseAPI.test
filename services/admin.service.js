@@ -613,37 +613,29 @@ async function getProductReport(query = {}) {
 
 // Admin Logs Management
 async function getAdminLogs(query = {}) {
-  const { page = 1, limit = 20, admin_user_id, action_type, target_entity_type, start_date, end_date } = query;
+  const { page = 1, limit = 50, action_type, user_id, date_from, date_to } = query;
   const offset = (page - 1) * limit;
-  
-  let queryBuilder = supabase
+
+  let adminLogsQuery = supabase
     .from('admin_logs')
     .select(`
-      *,
-      admin_user:admin_user_id(id, username, email, first_name, last_name)
+      id, admin_user_id, action_type, target_user_id, target_resource_type, target_resource_id, 
+      action_details, ip_address, user_agent, created_at,
+      admin_user:users!admin_logs_admin_user_id_fkey(first_name, last_name, email),
+      target_user:users!admin_logs_target_user_id_fkey(first_name, last_name, email)
     `, { count: 'exact' })
-    .order('created_at', { ascending: false });
-  
+    .order('created_at', { ascending: false })
+    .range(offset, offset + limit - 1);
+
   // Apply filters
-  if (admin_user_id) {
-    queryBuilder = queryBuilder.eq('admin_user_id', Number(admin_user_id));
-  }
-  if (action_type) {
-    queryBuilder = queryBuilder.eq('action_type', action_type);
-  }
-  if (target_entity_type) {
-    queryBuilder = queryBuilder.eq('target_entity_type', target_entity_type);
-  }
-  if (start_date) {
-    queryBuilder = queryBuilder.gte('created_at', start_date);
-  }
-  if (end_date) {
-    queryBuilder = queryBuilder.lte('created_at', end_date);
-  }
-  
-  const { data, error, count } = await queryBuilder.range(offset, offset + limit - 1);
+  if (action_type) adminLogsQuery = adminLogsQuery.eq('action_type', action_type);
+  if (user_id) adminLogsQuery = adminLogsQuery.eq('target_user_id', user_id);
+  if (date_from) adminLogsQuery = adminLogsQuery.gte('created_at', date_from);
+  if (date_to) adminLogsQuery = adminLogsQuery.lte('created_at', date_to);
+
+  const { data, error, count } = await adminLogsQuery;
   if (error) throw error;
-  
+
   return {
     data: data || [],
     meta: {
@@ -657,6 +649,153 @@ async function getAdminLogs(query = {}) {
   };
 }
 
+// Rental Management Functions
+async function getAllRentals(query = {}) {
+  const { page = 1, limit = 10, status, search, date_from, date_to, sort_by = 'created_at', sort_order = 'desc' } = query;
+  const offset = (page - 1) * limit;
+
+  let rentalsQuery = supabase
+    .from('rentals')
+    .select(`
+      id, rental_uid, rental_status, payment_status, start_date, end_date, 
+      total_amount_due, final_amount_paid, security_deposit_at_booking,
+      created_at, updated_at,
+      product:products(id, title, slug, primary_image:product_images(image_url)),
+      renter:users!fk_rentals_renter(id, first_name, last_name, email),
+      owner:users!fk_rentals_owner(id, first_name, last_name, email)
+    `, { count: 'exact' })
+    .eq('product.primary_image.is_primary', true)
+    .range(offset, offset + limit - 1);
+
+  // Apply filters
+  if (status) {
+    if (Array.isArray(status)) {
+      rentalsQuery = rentalsQuery.in('rental_status', status);
+    } else {
+      rentalsQuery = rentalsQuery.eq('rental_status', status);
+    }
+  }
+
+  if (search) {
+    rentalsQuery = rentalsQuery.or(`product.title.ilike.%${search}%,renter.first_name.ilike.%${search}%,renter.last_name.ilike.%${search}%,owner.first_name.ilike.%${search}%,owner.last_name.ilike.%${search}%`);
+  }
+
+  if (date_from) rentalsQuery = rentalsQuery.gte('created_at', date_from);
+  if (date_to) rentalsQuery = rentalsQuery.lte('created_at', date_to);
+
+  // Apply sorting
+  const ascending = sort_order === 'asc';
+  rentalsQuery = rentalsQuery.order(sort_by, { ascending });
+
+  const { data, error, count } = await rentalsQuery;
+  if (error) throw error;
+
+  // Post-process to ensure primary_image is an object or null
+  if (data) {
+    data.forEach(rental => {
+      if (rental.product && rental.product.primary_image && rental.product.primary_image.length > 0) {
+        rental.product.primary_image = rental.product.primary_image[0];
+      } else if (rental.product) {
+        rental.product.primary_image = { image_url: null };
+      }
+    });
+  }
+
+  return {
+    data: data || [],
+    meta: {
+      current_page: parseInt(page),
+      per_page: parseInt(limit),
+      total: count || 0,
+      last_page: Math.ceil((count || 0) / limit),
+      from: count > 0 ? offset + 1 : 0,
+      to: count > 0 ? Math.min(count, offset + limit) : 0
+    }
+  };
+}
+
+async function getRentalById(id) {
+  const { data, error } = await supabase
+    .from('rentals')
+    .select(`
+      *,
+      product:products(id, title, slug, description, price_per_day, latitude, longitude, primary_image:product_images(image_url)),
+      renter:users!fk_rentals_renter(id, first_name, last_name, email, phone_number),
+      owner:users!fk_rentals_owner(id, first_name, last_name, email, phone_number),
+      delivery_address:user_addresses(*, province:provinces(id, name_th)),
+      rental_status_history:rental_status_history(id, previous_status, new_status, changed_at, changed_by_user_id, notes, changed_by_system)
+    `)
+    .eq('product.primary_image.is_primary', true)
+    .eq('id', parseInt(id))
+    .single();
+
+  if (error) {
+    if (error.code === 'PGRST116') {
+      throw new ApiError(httpStatusCodes.NOT_FOUND, 'Rental not found');
+    }
+    throw error;
+  }
+
+  // Post-process to ensure primary_image is an object or null
+  if (data && data.product && data.product.primary_image && data.product.primary_image.length > 0) {
+    data.product.primary_image = data.product.primary_image[0];
+  } else if (data && data.product) {
+    data.product.primary_image = { image_url: null };
+  }
+
+  return data;
+}
+
+async function updateRentalStatus(id, body, adminUserId = null, req = null) {
+  const { status, notes } = body;
+  
+  // Get current rental
+  const currentRental = await getRentalById(id);
+  if (!currentRental) {
+    throw new ApiError(httpStatusCodes.NOT_FOUND, 'Rental not found');
+  }
+
+  // Update rental status
+  const { data, error } = await supabase
+    .from('rentals')
+    .update({
+      rental_status: status,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', parseInt(id))
+    .select()
+    .single();
+
+  if (error) throw error;
+
+  // Log status change in rental_status_history
+  const { error: historyError } = await supabase
+    .from('rental_status_history')
+    .insert({
+      rental_id: parseInt(id),
+      previous_status: currentRental.rental_status,
+      new_status: status,
+      changed_by_user_id: adminUserId,
+      changed_by_system: false,
+      notes: notes || `Status updated by admin to ${status}`
+    });
+
+  if (historyError) {
+    console.error('Error logging rental status history:', historyError);
+  }
+
+  // Log admin action
+  if (adminUserId) {
+    await AdminLogger.logUserAction(adminUserId, 'RENTAL_STATUS_UPDATE', parseInt(id), {
+      previous_status: currentRental.rental_status,
+      new_status: status,
+      notes: notes
+    }, req);
+  }
+
+  return data;
+}
+
 export default {
   login,
   getAllUsers, getUserById, updateUser, banUser, unbanUser, deleteUser, updateUserIdVerification,
@@ -664,5 +803,6 @@ export default {
   getRentalReport, getIncomeReport, getPlatformStats, getComplaintReport, getUserReputationReport,
   getAllProducts, approveProduct, getAllCategories, createCategory, updateCategory, deleteCategory,
   getSettings, updateSettings,
-  getProductReport, getAdminLogs
+  getProductReport, getAdminLogs,
+  getAllRentals, getRentalById, updateRentalStatus
 };

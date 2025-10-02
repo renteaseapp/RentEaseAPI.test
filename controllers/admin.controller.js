@@ -75,6 +75,23 @@ const getAdminLogs = asyncHandler(async (req, res) => {
   });
 });
 
+// Rental Management
+const getAllRentals = asyncHandler(async (req, res) => {
+  const { page = 1, limit = 10, ...filters } = req.query;
+  const result = await adminService.getAllRentals({ page, limit, filters });
+  res.json(result);
+});
+
+const getRentalById = asyncHandler(async (req, res) => {
+  const result = await adminService.getRentalById(req.params.id);
+  res.json(result);
+});
+
+const updateRentalStatus = asyncHandler(async (req, res) => {
+  const result = await adminService.updateRentalStatus(req.params.id, req.body, req.user.id, req);
+  res.json(result);
+});
+
 const adminController = {
   login,
   getAllUsers, getUserById, updateUser, banUser, unbanUser, deleteUser, updateUserIdVerification,
@@ -82,7 +99,8 @@ const adminController = {
   getRentalReport, getIncomeReport, getPlatformStats, getComplaintReport, getUserReputationReport,
   getAllProducts, approveProduct, getAllCategories, createCategory, updateCategory, deleteCategory,
   getSettings, updateSettings,
-  getProductReport, getAdminLogs
+  getProductReport, getAdminLogs,
+  getAllRentals, getRentalById, updateRentalStatus
 };
 
-export default adminController; 
+export default adminController;

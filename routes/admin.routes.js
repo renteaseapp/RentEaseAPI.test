@@ -44,9 +44,14 @@ router.delete('/categories/:id', adminController.deleteCategory);
 router.get('/settings', adminController.getSettings);
 router.put('/settings', adminController.updateSettings);
 
+// Rental Management
+router.get('/rentals', adminController.getAllRentals);
+router.get('/rentals/:id', adminController.getRentalById);
+router.put('/rentals/:id/status', adminController.updateRentalStatus);
+
 // Admin Logs Management
 router.get('/logs', adminController.getAdminLogs);
 
 
 
-export default router; 
+export default router;
