@@ -7,7 +7,7 @@ import httpStatusCodes from '../constants/httpStatusCodes.js';
 const ID_VERIFICATION_STATUS = {
     NOT_SUBMITTED: 'not_submitted',
     PENDING: 'pending',
-    APPROVED: 'approved',
+    APPROVED: 'verified',
     REJECTED: 'rejected'
 };
 
@@ -190,4 +190,4 @@ const IdVerificationService = {
     }
 };
 
-export default IdVerificationService; 
+export default IdVerificationService;
