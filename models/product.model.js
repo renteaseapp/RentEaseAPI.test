@@ -616,7 +616,7 @@ const ProductModel = {
     },
 
     async findByOwnerId(ownerId, filters = {}) {
-        const { page = 1, limit = 10, status, q } = filters;
+        const { page = 1, limit = 10, availability_status, q } = filters;
         const offset = (page - 1) * limit;
 
         let query = supabase
@@ -630,10 +630,8 @@ const ProductModel = {
             .eq('owner_id', ownerId)
             .is('deleted_at', null);
 
-        if (status) {
-            query = query.eq('availability_status', status); // Filter by availability_status or admin_approval_status?
-            // Based on ownerProductListQuerySchema, it seems to filter by availability_status
-            // If filtering by admin_approval_status is also needed, schema and query should be adjusted.
+        if (availability_status) {
+            query = query.eq('availability_status', availability_status);
         }
         
         if (q) {
