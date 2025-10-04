@@ -241,7 +241,7 @@ async function getIncomeReport() {
 }
 
 async function getPlatformStats() {
-  // สถิติการใช้งานแพลตฟอร์ม
+  // สถิตการใช้งานแพลตฟอร์ม
   const [{ count: userCount }, { count: rentalCount }] = await Promise.all([
     supabase.from('users').select('id', { count: 'exact' }),
     supabase.from('rentals').select('id', { count: 'exact' })
@@ -613,25 +613,28 @@ async function getProductReport(query = {}) {
 
 // Admin Logs Management
 async function getAdminLogs(query = {}) {
-  const { page = 1, limit = 50, action_type, user_id, date_from, date_to } = query;
+  const { page = 1, limit = 50, action_type, admin_user_id, target_entity_type, start_date, end_date, user_id, date_from, date_to } = query;
   const offset = (page - 1) * limit;
 
   let adminLogsQuery = supabase
     .from('admin_logs')
     .select(`
-      id, admin_user_id, action_type, target_user_id, target_resource_type, target_resource_id, 
-      action_details, ip_address, user_agent, created_at,
-      admin_user:users!admin_logs_admin_user_id_fkey(first_name, last_name, email),
-      target_user:users!admin_logs_target_user_id_fkey(first_name, last_name, email)
+      id, admin_user_id, action_type, target_entity_type, target_entity_id, target_entity_uid, 
+      details, ip_address, user_agent, created_at,
+      admin_user:users!fk_admin_logs_admin(id, username, email, first_name, last_name)
     `, { count: 'exact' })
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1);
 
-  // Apply filters
+  // Apply filters (support both frontend and legacy param names)
   if (action_type) adminLogsQuery = adminLogsQuery.eq('action_type', action_type);
-  if (user_id) adminLogsQuery = adminLogsQuery.eq('target_user_id', user_id);
-  if (date_from) adminLogsQuery = adminLogsQuery.gte('created_at', date_from);
-  if (date_to) adminLogsQuery = adminLogsQuery.lte('created_at', date_to);
+  if (admin_user_id) adminLogsQuery = adminLogsQuery.eq('admin_user_id', admin_user_id);
+  if (target_entity_type) adminLogsQuery = adminLogsQuery.eq('target_entity_type', target_entity_type);
+  if (user_id) adminLogsQuery = adminLogsQuery.eq('admin_user_id', user_id); // legacy fallback
+  const fromDate = date_from || start_date;
+  const toDate = date_to || end_date;
+  if (fromDate) adminLogsQuery = adminLogsQuery.gte('created_at', fromDate);
+  if (toDate) adminLogsQuery = adminLogsQuery.lte('created_at', toDate);
 
   const { data, error, count } = await adminLogsQuery;
   if (error) throw error;
