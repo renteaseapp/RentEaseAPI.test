@@ -1216,30 +1216,35 @@ const RentalService = {
             throw new ApiError(httpStatusCodes.BAD_REQUEST, "actual_pickup_time is required.");
         }
         
-        // Update both actual_pickup_time and delivery_status to 'delivered'
+        // เมื่อผู้เช่ายืนยันเวลารับสินค้าจริงแล้ว ให้เปลี่ยนสถานะเป็น 'active' (กำลังใช้งาน) หากเดิมเป็น 'confirmed'
+        const nextStatus = rental.rental_status === 'confirmed' ? 'active' : rental.rental_status;
+        
+        // อัปเดต actual_pickup_time, delivery_status และ rental_status (ถ้าต้องเปลี่ยน)
         const updatePayload = {
             actual_pickup_time: actualPickupTime,
-            delivery_status: 'delivered'
+            delivery_status: 'delivered',
+            ...(nextStatus !== rental.rental_status ? { rental_status: nextStatus } : {}),
+            updated_at: new Date().toISOString()
         };
         
         const updatedRental = await RentalModel.update(rental.id, updatePayload);
         await RentalStatusHistoryModel.create(
             rental.id,
-            updatedRental.rental_status,
+            nextStatus,
             userId,
-            `Renter set actual pickup time: ${actualPickupTime} and marked as delivered`,
+            `Renter set actual pickup time: ${actualPickupTime}. Status changed to '${nextStatus}'. Delivery marked as delivered`,
             rental.rental_status
         );
 
         // Emit realtime events
         emitRentalUpdate(updatedRental.id, updatedRental);
 
-        // Notify owner that item has been delivered
+        // Notify owner that item has been delivered / rental activated
         await NotificationService.createNotification({
             user_id: rental.owner_id,
             type: 'item_delivered',
-            title: 'สินค้าถูกจัดส่งแล้ว',
-            message: `ผู้เช่าได้ยืนยันการรับสินค้า '${rental.product?.title || ''}' แล้ว`,
+            title: 'ผู้เช้ายืนยันการรับสินค้าแล้ว',
+            message: `ผู้เช่าได้ยืนยันการรับสินค้า '${rental.product?.title || ''}' แล้ว และสถานะเช่าถูกเปลี่ยนเป็นกำลังใช้งาน`,
             link_url: `/owner/rentals/${rental.id}`,
             related_entity_type: 'rental',
             related_entity_id: rental.id,

@@ -23,8 +23,8 @@ CREATE TABLE public.admin_users (
   created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
   updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT admin_users_pkey PRIMARY KEY (id),
-  CONSTRAINT fk_admin_users_user FOREIGN KEY (user_id) REFERENCES public.users(id),
-  CONSTRAINT fk_admin_users_granted_by FOREIGN KEY (granted_by_admin_id) REFERENCES public.users(id)
+  CONSTRAINT fk_admin_users_granted_by FOREIGN KEY (granted_by_admin_id) REFERENCES public.users(id),
+  CONSTRAINT fk_admin_users_user FOREIGN KEY (user_id) REFERENCES public.users(id)
 );
 CREATE TABLE public.categories (
   id bigint NOT NULL DEFAULT nextval('categories_id_seq'::regclass),
@@ -59,10 +59,10 @@ CREATE TABLE public.chat_conversations (
   created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
   updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT chat_conversations_pkey PRIMARY KEY (id),
-  CONSTRAINT fk_chat_conversations_p1 FOREIGN KEY (participant1_id) REFERENCES public.users(id),
   CONSTRAINT fk_chat_conversations_last_message FOREIGN KEY (last_message_id) REFERENCES public.chat_messages(id),
-  CONSTRAINT fk_chat_conversations_product FOREIGN KEY (related_product_id) REFERENCES public.products(id),
+  CONSTRAINT fk_chat_conversations_p1 FOREIGN KEY (participant1_id) REFERENCES public.users(id),
   CONSTRAINT fk_chat_conversations_p2 FOREIGN KEY (participant2_id) REFERENCES public.users(id),
+  CONSTRAINT fk_chat_conversations_product FOREIGN KEY (related_product_id) REFERENCES public.products(id),
   CONSTRAINT fk_chat_conversations_rental FOREIGN KEY (related_rental_id) REFERENCES public.rentals(id)
 );
 CREATE TABLE public.chat_messages (
@@ -78,8 +78,8 @@ CREATE TABLE public.chat_messages (
   read_at timestamp with time zone,
   is_deleted_by_sender boolean DEFAULT false,
   CONSTRAINT chat_messages_pkey PRIMARY KEY (id),
-  CONSTRAINT fk_chat_messages_sender FOREIGN KEY (sender_id) REFERENCES public.users(id),
-  CONSTRAINT fk_chat_messages_conversation FOREIGN KEY (conversation_id) REFERENCES public.chat_conversations(id)
+  CONSTRAINT fk_chat_messages_conversation FOREIGN KEY (conversation_id) REFERENCES public.chat_conversations(id),
+  CONSTRAINT fk_chat_messages_sender FOREIGN KEY (sender_id) REFERENCES public.users(id)
 );
 CREATE TABLE public.complaint_attachments (
   id bigint NOT NULL DEFAULT nextval('complaint_attachments_id_seq'::regclass),
@@ -113,9 +113,9 @@ CREATE TABLE public.complaints (
   resolved_at timestamp with time zone,
   closed_at timestamp with time zone,
   CONSTRAINT complaints_pkey PRIMARY KEY (id),
-  CONSTRAINT fk_complaints_product FOREIGN KEY (related_product_id) REFERENCES public.products(id),
   CONSTRAINT fk_complaints_admin_handler FOREIGN KEY (admin_handler_id) REFERENCES public.users(id),
   CONSTRAINT fk_complaints_complainant FOREIGN KEY (complainant_id) REFERENCES public.users(id),
+  CONSTRAINT fk_complaints_product FOREIGN KEY (related_product_id) REFERENCES public.products(id),
   CONSTRAINT fk_complaints_rental FOREIGN KEY (related_rental_id) REFERENCES public.rentals(id),
   CONSTRAINT fk_complaints_subject_user FOREIGN KEY (subject_user_id) REFERENCES public.users(id)
 );
@@ -154,8 +154,8 @@ CREATE TABLE public.payment_transactions (
   transaction_time timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
   notes text,
   CONSTRAINT payment_transactions_pkey PRIMARY KEY (id),
-  CONSTRAINT fk_payment_transactions_user FOREIGN KEY (user_id) REFERENCES public.users(id),
-  CONSTRAINT fk_payment_transactions_rental FOREIGN KEY (rental_id) REFERENCES public.rentals(id)
+  CONSTRAINT fk_payment_transactions_rental FOREIGN KEY (rental_id) REFERENCES public.rentals(id),
+  CONSTRAINT fk_payment_transactions_user FOREIGN KEY (user_id) REFERENCES public.users(id)
 );
 CREATE TABLE public.payout_methods (
   id bigint NOT NULL DEFAULT nextval('payout_methods_id_seq'::regclass),
@@ -215,10 +215,10 @@ CREATE TABLE public.products (
   published_at timestamp with time zone,
   deleted_at timestamp with time zone,
   CONSTRAINT products_pkey PRIMARY KEY (id),
-  CONSTRAINT fk_products_province FOREIGN KEY (province_id) REFERENCES public.provinces(id),
-  CONSTRAINT fk_products_owner FOREIGN KEY (owner_id) REFERENCES public.users(id),
+  CONSTRAINT fk_products_approved_by_admin FOREIGN KEY (approved_by_admin_id) REFERENCES public.users(id),
   CONSTRAINT fk_products_category FOREIGN KEY (category_id) REFERENCES public.categories(id),
-  CONSTRAINT fk_products_approved_by_admin FOREIGN KEY (approved_by_admin_id) REFERENCES public.users(id)
+  CONSTRAINT fk_products_owner FOREIGN KEY (owner_id) REFERENCES public.users(id),
+  CONSTRAINT fk_products_province FOREIGN KEY (province_id) REFERENCES public.provinces(id)
 );
 CREATE TABLE public.provinces (
   id bigint NOT NULL DEFAULT nextval('provinces_id_seq'::regclass),
@@ -239,8 +239,8 @@ CREATE TABLE public.rental_status_history (
   changed_by_system boolean DEFAULT false,
   notes text,
   CONSTRAINT rental_status_history_pkey PRIMARY KEY (id),
-  CONSTRAINT fk_rental_status_history_user FOREIGN KEY (changed_by_user_id) REFERENCES public.users(id),
-  CONSTRAINT fk_rental_status_history_rental FOREIGN KEY (rental_id) REFERENCES public.rentals(id)
+  CONSTRAINT fk_rental_status_history_rental FOREIGN KEY (rental_id) REFERENCES public.rentals(id),
+  CONSTRAINT fk_rental_status_history_user FOREIGN KEY (changed_by_user_id) REFERENCES public.users(id)
 );
 CREATE TABLE public.rentals (
   id bigint NOT NULL DEFAULT nextval('rentals_id_seq'::regclass),
@@ -290,16 +290,16 @@ CREATE TABLE public.rentals (
   rental_price_per_week_at_booking numeric,
   rental_price_per_month_at_booking numeric,
   CONSTRAINT rentals_pkey PRIMARY KEY (id),
-  CONSTRAINT fk_rentals_owner FOREIGN KEY (owner_id) REFERENCES public.users(id),
-  CONSTRAINT fk_rentals_delivery_address FOREIGN KEY (delivery_address_id) REFERENCES public.user_addresses(id),
   CONSTRAINT fk_rentals_cancelled_by FOREIGN KEY (cancelled_by_user_id) REFERENCES public.users(id),
+  CONSTRAINT fk_rentals_delivery_address FOREIGN KEY (delivery_address_id) REFERENCES public.user_addresses(id),
+  CONSTRAINT fk_rentals_owner FOREIGN KEY (owner_id) REFERENCES public.users(id),
+  CONSTRAINT fk_rentals_payment_verified_by FOREIGN KEY (payment_verified_by_user_id) REFERENCES public.users(id),
   CONSTRAINT fk_rentals_product FOREIGN KEY (product_id) REFERENCES public.products(id),
-  CONSTRAINT fk_rentals_renter FOREIGN KEY (renter_id) REFERENCES public.users(id),
-  CONSTRAINT fk_rentals_payment_verified_by FOREIGN KEY (payment_verified_by_user_id) REFERENCES public.users(id)
+  CONSTRAINT fk_rentals_renter FOREIGN KEY (renter_id) REFERENCES public.users(id)
 );
 CREATE TABLE public.reviews (
   id bigint NOT NULL DEFAULT nextval('reviews_id_seq'::regclass),
-  rental_id bigint NOT NULL UNIQUE,
+  rental_id bigint NOT NULL,
   renter_id bigint NOT NULL,
   product_id bigint NOT NULL,
   owner_id bigint NOT NULL,
@@ -311,10 +311,10 @@ CREATE TABLE public.reviews (
   created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
   updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT reviews_pkey PRIMARY KEY (id),
-  CONSTRAINT fk_reviews_renter FOREIGN KEY (renter_id) REFERENCES public.users(id),
-  CONSTRAINT fk_reviews_product FOREIGN KEY (product_id) REFERENCES public.products(id),
   CONSTRAINT fk_reviews_owner FOREIGN KEY (owner_id) REFERENCES public.users(id),
-  CONSTRAINT fk_reviews_rental FOREIGN KEY (rental_id) REFERENCES public.rentals(id)
+  CONSTRAINT fk_reviews_product FOREIGN KEY (product_id) REFERENCES public.products(id),
+  CONSTRAINT fk_reviews_rental FOREIGN KEY (rental_id) REFERENCES public.rentals(id),
+  CONSTRAINT fk_reviews_renter FOREIGN KEY (renter_id) REFERENCES public.users(id)
 );
 CREATE TABLE public.system_settings (
   setting_key character varying NOT NULL,
@@ -347,8 +347,8 @@ CREATE TABLE public.user_addresses (
   created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
   updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT user_addresses_pkey PRIMARY KEY (id),
-  CONSTRAINT fk_user_addresses_user FOREIGN KEY (user_id) REFERENCES public.users(id),
-  CONSTRAINT fk_user_addresses_province FOREIGN KEY (province_id) REFERENCES public.provinces(id)
+  CONSTRAINT fk_user_addresses_province FOREIGN KEY (province_id) REFERENCES public.provinces(id),
+  CONSTRAINT fk_user_addresses_user FOREIGN KEY (user_id) REFERENCES public.users(id)
 );
 CREATE TABLE public.users (
   id bigint NOT NULL DEFAULT nextval('users_id_seq'::regclass),
@@ -393,9 +393,9 @@ CREATE TABLE public.wishlist (
   user_id bigint NOT NULL,
   product_id bigint NOT NULL,
   added_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT wishlist_pkey PRIMARY KEY (user_id, product_id),
-  CONSTRAINT fk_wishlist_user FOREIGN KEY (user_id) REFERENCES public.users(id),
-  CONSTRAINT fk_wishlist_product FOREIGN KEY (product_id) REFERENCES public.products(id)
+  CONSTRAINT wishlist_pkey PRIMARY KEY (product_id, user_id),
+  CONSTRAINT fk_wishlist_product FOREIGN KEY (product_id) REFERENCES public.products(id),
+  CONSTRAINT fk_wishlist_user FOREIGN KEY (user_id) REFERENCES public.users(id)
 );
 
 
