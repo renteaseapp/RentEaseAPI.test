@@ -12,6 +12,7 @@ import jwt from 'jsonwebtoken';
 import jwtConfig from './config/jwt.config.js';
 
 import NotificationService from './services/notification.service.js';
+import schedulerService from './services/scheduler.service.js';
 
 dotenv.config(); // Load .env variables
 
@@ -369,6 +370,28 @@ server.listen(serverConfig.PORT, () => {
     console.log(`🚀 Server is running on port ${serverConfig.PORT} in ${serverConfig.NODE_ENV} mode.`);
     console.log(`🔗 Access at http://localhost:${serverConfig.PORT}`);
     console.log(`🔌 Socket.IO server is ready for realtime connections`);
+    
+    // เริ่มต้น schedulers
+    schedulerService.startAllSchedulers();
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+    console.log('🛑 SIGTERM received, shutting down gracefully...');
+    schedulerService.stopAllSchedulers();
+    server.close(() => {
+        console.log('✅ Server closed');
+        process.exit(0);
+    });
+});
+
+process.on('SIGINT', () => {
+    console.log('🛑 SIGINT received, shutting down gracefully...');
+    schedulerService.stopAllSchedulers();
+    server.close(() => {
+        console.log('✅ Server closed');
+        process.exit(0);
+    });
 });
 
 export { app, io };
