@@ -296,6 +296,12 @@ const ProductModel = {
         const monthStart = new Date(year, month - 1, 1).toISOString().split('T')[0];
         const monthEnd = new Date(year, month, 0).toISOString().split('T')[0];
 
+        // Get product info to check quantity
+        const product = await this.findByIdOrSlug(productId);
+        if (!product) {
+            throw new Error('Product not found');
+        }
+
         // Get buffer time settings
         const SystemSettingModel = (await import('./systemSetting.model.js')).default;
         const [enableBufferSetting, deliveryBufferSetting, returnBufferSetting] = await Promise.all([
@@ -321,7 +327,9 @@ const ProductModel = {
             throw error;
         }
 
-        const bookedDates = [];
+        // Count rentals per date to check against product quantity
+        const dateRentalCount = new Map();
+        
         if (data) {
             data.forEach(rental => {
                 // Calculate buffer dates
@@ -338,13 +346,23 @@ const ProductModel = {
                 let currentDate = new Date(bufferStartDate);
                 while (currentDate <= bufferEndDate) {
                     const currentDateStr = currentDate.toISOString().split('T')[0];
-                    if (currentDateStr >= monthStart && currentDateStr <= monthEnd && !bookedDates.includes(currentDateStr)) {
-                        bookedDates.push(currentDateStr);
+                    if (currentDateStr >= monthStart && currentDateStr <= monthEnd) {
+                        const currentCount = dateRentalCount.get(currentDateStr) || 0;
+                        dateRentalCount.set(currentDateStr, currentCount + 1);
                     }
                     currentDate.setUTCDate(currentDate.getUTCDate() + 1);
                 }
             });
         }
+
+        // Only mark dates as booked if rental count >= product quantity
+        const bookedDates = [];
+        for (const [dateStr, rentalCount] of dateRentalCount.entries()) {
+            if (rentalCount >= product.quantity) {
+                bookedDates.push(dateStr);
+            }
+        }
+
         return bookedDates.sort();
     },
 
@@ -534,7 +552,13 @@ const ProductModel = {
             quantity: 1
         }));
 
-        return rentalsWithQuantity;
+        // Get booked dates using the same logic as getProductAvailability
+        const bookedDates = await this.getProductAvailability(productId, yearMonth);
+
+        return {
+            rentals: rentalsWithQuantity,
+            booked_dates: bookedDates
+        };
     },
 
     async create(productData) {
@@ -876,21 +900,18 @@ const ProductModel = {
                 throw new ApiError(httpStatusCodes.NOT_FOUND, "Product not found or not approved.");
             }
 
-            // ตรวจสอบสถานะสินค้า - อนุญาตให้เช่าได้ถ้าเป็น available หรือ rented_out แต่มี quantity_available เพียงพอ
+            // ตรวจสอบสถานะสินค้า - อนุญาตให้เช่าได้ถ้าเป็น available หรือ rented_out
             if (product.availability_status !== 'available' && product.availability_status !== 'rented_out') {
                 throw new ApiError(httpStatusCodes.BAD_REQUEST, 
                     `Product "${product.title}" is currently not available for rental. Status: ${product.availability_status}`);
             }
 
-            // ตรวจสอบจำนวนที่พร้อมให้เช่า
-            if (product.quantity_available < requestedQuantity) {
-                throw new ApiError(httpStatusCodes.BAD_REQUEST, 
-                    `Product "${product.title}" is currently out of stock. Available: ${product.quantity_available}, Requested: ${requestedQuantity}`);
-            }
+            // สำหรับระบบเช่าล่วงหน้า เราไม่ต้องตรวจสอบ quantity_available ที่นี่
+            // เพราะการตรวจสอบความพร้อมใช้งานจะทำผ่าน checkAvailabilityWithBuffer แทน
+            // quantity_available จะคงที่ไว้เพื่อให้เช่าล่วงหน้าได้
 
-            // ถ้าผ่านการตรวจสอบทั้งหมด ให้จอง quantity ไว้ชั่วคราว
-            // (ในระบบจริงอาจใช้ Redis หรือ database lock)
-            await this.updateQuantityAvailable(productId, -requestedQuantity);
+            // ไม่ลด quantity_available สำหรับการเช่าล่วงหน้า
+            // ระบบจะใช้การนับ active rentals ในช่วงเวลานั้นๆ แทน
 
             return {
                 success: true,
@@ -909,11 +930,25 @@ const ProductModel = {
         try {
             console.log(`Releasing ${quantityToRelease} units for product ${productId}. Reason: ${reason}`);
             
-            const updatedProduct = await this.updateQuantityAvailable(productId, quantityToRelease);
+            // สำหรับระบบเช่าล่วงหน้า เราไม่ต้องเพิ่ม quantity_available กลับ
+            // เพราะเราไม่ได้ลดมันตั้งแต่แรก
+            // ระบบจะใช้การนับ active rentals ในช่วงเวลานั้นๆ แทน
             
+            // ดึงข้อมูลสินค้าปัจจุบันเพื่อ return
+            const { data: product, error } = await supabase
+                .from('products')
+                .select('*')
+                .eq('id', productId)
+                .single();
+
+            if (error) {
+                console.error('Error fetching product for release:', error);
+                throw error;
+            }
+
             return {
                 success: true,
-                product: updatedProduct,
+                product: product,
                 released_quantity: quantityToRelease,
                 reason: reason
             };
@@ -949,34 +984,30 @@ const ProductModel = {
             const syncResults = [];
 
             for (const product of products) {
-                // นับจำนวนการเช่าที่ active
-                const { data: activeRentals, error: rentalError } = await supabase
-                    .from('rentals')
-                    .select('id')
-                    .eq('product_id', product.id)
-                    .in('rental_status', ['confirmed', 'active']);
+                // สำหรับระบบเช่าล่วงหน้า quantity_available ควรเท่ากับ quantity เสมอ
+                // เพราะเราไม่ลดมันเมื่อมีการเช่า
+                const correctQuantityAvailable = product.quantity;
 
-                if (rentalError) {
-                    console.error(`Error fetching rentals for product ${product.id}:`, rentalError);
-                    continue;
-                }
-
-                const activeRentalCount = activeRentals?.length || 0;
-                const correctQuantityAvailable = Math.max(0, product.quantity - activeRentalCount);
-
-                // ถ้า quantity_available ไม่ตรงกับที่คำนวณได้
+                // ถ้า quantity_available ไม่ตรงกับ quantity
                 if (product.quantity_available !== correctQuantityAvailable) {
                     console.log(`Syncing product ${product.id}: ${product.quantity_available} → ${correctQuantityAvailable}`);
                     
-                    const quantityDiff = correctQuantityAvailable - product.quantity_available;
-                    await this.updateQuantityAvailable(product.id, quantityDiff);
+                    // อัปเดตโดยตรงไปที่ database
+                    const { error: updateError } = await supabase
+                        .from('products')
+                        .update({ quantity_available: correctQuantityAvailable })
+                        .eq('id', product.id);
+
+                    if (updateError) {
+                        console.error(`Error updating product ${product.id}:`, updateError);
+                        continue;
+                    }
                     
                     syncResults.push({
                         product_id: product.id,
                         title: product.title,
                         old_quantity_available: product.quantity_available,
-                        new_quantity_available: correctQuantityAvailable,
-                        active_rentals: activeRentalCount
+                        new_quantity_available: correctQuantityAvailable
                     });
                 }
             }

@@ -255,13 +255,13 @@ npm run setup:data      # Insert initial data only
 #### 1. ตรวจสอบ Server Status
 
 ```bash
-curl https://renteaseapi2.onrender.com/api/health
+curl http://localhost:65019/api/health
 ```
 
 #### 2. ตรวจสอบ Database Connection
 
 ```bash
-curl https://renteaseapi2.onrender.com/api/provinces
+curl http://localhost:65019/api/provinces
 ```
 
 #### 3. ตรวจสอบ Storage Buckets
@@ -278,7 +278,7 @@ curl https://renteaseapi2.onrender.com/api/provinces
 ### 🔗 Base URL
 
 ```
-Development: https://renteaseapi2.onrender.com/api
+Development: http://localhost:65019/api
 Production:  https://your-domain.com/api
 ```
 
@@ -525,7 +525,7 @@ if (!user) {
 npm run dev
 
 # Manual testing
-curl -X GET https://renteaseapi2.onrender.com/api/health
+curl -X GET http://localhost:65019/api/health
 ```
 
 ### 🔍 Debugging

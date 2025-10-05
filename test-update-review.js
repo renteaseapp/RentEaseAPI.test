@@ -40,7 +40,7 @@ async function testUpdateReview() {
         
         // First, let's check if there's an existing review
         console.log('\n📋 Checking existing review...');
-        const checkResponse = await fetch(`https://renteaseapi2.onrender.com/api/reviews/${rentalId}`, {
+        const checkResponse = await fetch(`http://localhost:65019/api/reviews/${rentalId}`, {
             method: 'GET',
             headers: {
                 'Authorization': `Bearer ${token}`,
@@ -60,7 +60,7 @@ async function testUpdateReview() {
                 comment: "Updated review: This product was even better than I initially thought! Great service from the owner too."
             };
             
-            const updateResponse = await fetch(`https://renteaseapi2.onrender.com/api/reviews/${rentalId}`, {
+            const updateResponse = await fetch(`http://localhost:65019/api/reviews/${rentalId}`, {
                 method: 'PUT',
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -106,7 +106,7 @@ async function testCreateReview() {
             comment: "Initial review: Good product and service."
         };
         
-        const response = await fetch('https://renteaseapi2.onrender.com/api/reviews', {
+        const response = await fetch('http://localhost:65019/api/reviews', {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${token}`,

@@ -21,9 +21,9 @@ const RentalModel = {
             })
             .select(`
                 *,
-                product:products(title, slug, latitude, longitude, primary_image:product_images(image_url)),
-                renter:users!fk_rentals_renter(first_name, email),
-                owner:users!fk_rentals_owner(first_name, email),
+                product:products(title, slug, address_details, latitude, longitude, primary_image:product_images(image_url)),
+                renter:users!fk_rentals_renter(first_name, last_name, email),
+                owner:users!fk_rentals_owner(first_name, last_name, email),
                 delivery_address:user_addresses(*, province:provinces (id, name_th))
             `)
             .eq('product.primary_image.is_primary', true) // Ensure primary image subquery is filtered
@@ -57,9 +57,9 @@ const RentalModel = {
             .from('rentals')
             .select(`
                 *,
-                product:products(title, slug, latitude, longitude, primary_image:product_images(image_url)),
-                renter:users!fk_rentals_renter(first_name, email),
-                owner:users!fk_rentals_owner(first_name, email),
+                product:products(title, slug, address_details, latitude, longitude, primary_image:product_images(image_url)),
+                renter:users!fk_rentals_renter(first_name, last_name, email),
+                owner:users!fk_rentals_owner(first_name, last_name, email),
                 delivery_address:user_addresses(*, province:provinces (id, name_th))
             `)
             .eq('product.primary_image.is_primary', true);
@@ -97,9 +97,9 @@ const RentalModel = {
             .from('rentals')
             .select(`
                 *,
-                product:products(title, slug, latitude, longitude, primary_image:product_images(image_url)),
-                renter:users!fk_rentals_renter(first_name, email),
-                owner:users!fk_rentals_owner(first_name, email),
+                product:products(title, slug, address_details, latitude, longitude, primary_image:product_images(image_url)),
+                renter:users!fk_rentals_renter(first_name, last_name, email),
+                owner:users!fk_rentals_owner(first_name, last_name, email),
                 delivery_address:user_addresses(*, province:provinces (id, name_th))
             `, { count: 'exact' })
             .eq('product.primary_image.is_primary', true);
@@ -179,9 +179,9 @@ const RentalModel = {
             .eq('id', rentalId)
             .select(`
                 *,
-                product:products(title, slug, latitude, longitude, primary_image:product_images(image_url)),
-                renter:users!fk_rentals_renter(first_name, email),
-                owner:users!fk_rentals_owner(first_name, email),
+                product:products(title, slug, address_details, latitude, longitude, primary_image:product_images(image_url)),
+                renter:users!fk_rentals_renter(first_name, last_name, email),
+                owner:users!fk_rentals_owner(first_name, last_name, email),
                 delivery_address:user_addresses(*, province:provinces (id, name_th))
             `)
             .eq('product.primary_image.is_primary', true)

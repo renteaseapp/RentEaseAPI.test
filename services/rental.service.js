@@ -285,13 +285,9 @@ const RentalService = {
         // Emit realtime events
         emitRentalCreated(rental);
         
-        // Emit product quantity update
-        emitQuantityUpdate(product.id, {
-            product_id: product.id,
-            quantity_available: product.quantity_available - 1,
-            quantity_reserved: product.quantity_reserved + 1,
-            availability_status: product.availability_status
-        });
+        // สำหรับระบบเช่าล่วงหน้า เราไม่ต้อง emit quantity update
+        // เพราะ quantity_available ไม่เปลี่ยนแปลง
+        // ระบบจะใช้การนับ active rentals ในช่วงเวลานั้นๆ แทน
         
         // แจ้งเตือน owner ว่ามีคำขอเช่าใหม่
         await NotificationService.createNotification({
