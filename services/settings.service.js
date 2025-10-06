@@ -81,11 +81,13 @@ const SettingsService = {
             const [
                 bufferEnabledSetting,
                 deliveryBufferSetting,
-                returnBufferSetting
+                returnBufferSetting,
+                maxRentalDaysSetting
             ] = await Promise.all([
                 SystemSettingModel.getSetting('buffer_enabled', 'true'),
                 SystemSettingModel.getSetting('delivery_buffer_days', '1'),
-                SystemSettingModel.getSetting('return_buffer_days', '1')
+                SystemSettingModel.getSetting('return_buffer_days', '1'),
+                SystemSettingModel.getSetting('max_rental_days', '30')
             ]);
 
             return {
@@ -93,6 +95,9 @@ const SettingsService = {
                     enabled: bufferEnabledSetting.setting_value === 'true',
                     delivery_buffer_days: parseInt(deliveryBufferSetting.setting_value) || 1,
                     return_buffer_days: parseInt(returnBufferSetting.setting_value) || 1
+                },
+                rental_settings: {
+                    max_rental_days: parseInt(maxRentalDaysSetting.setting_value) || 30
                 }
             };
         } catch (error) {

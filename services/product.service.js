@@ -86,6 +86,19 @@ const ProductService = {
             throw new ApiError(httpStatusCodes.BAD_REQUEST, "Product data is required");
         }
 
+        // Validate max_rental_duration_days against system settings
+        if (productData.max_rental_duration_days) {
+            const maxRentalDaysSetting = await SystemSettingModel.getSetting('max_rental_days', '30');
+            const maxRentalDays = parseInt(maxRentalDaysSetting.setting_value) || 30;
+            
+            if (productData.max_rental_duration_days > maxRentalDays) {
+                throw new ApiError(
+                    httpStatusCodes.BAD_REQUEST,
+                    `ระยะเวลาเช่าสูงสุดต้องไม่เกิน ${maxRentalDays} วันตามที่ระบบกำหนด`
+                );
+            }
+        }
+
         // Generate slug from title
         let slug = slugify(productData.title, {
             lower: true,
@@ -217,6 +230,19 @@ const ProductService = {
 
         if (!existingProduct || existingProduct.owner_id !== ownerId) {
             throw new ApiError(httpStatusCodes.NOT_FOUND, "Product not found or does not belong to the owner.");
+        }
+
+        // Validate max_rental_duration_days against system settings
+        if (updatedProductData.max_rental_duration_days) {
+            const maxRentalDaysSetting = await SystemSettingModel.getSetting('max_rental_days', '30');
+            const maxRentalDays = parseInt(maxRentalDaysSetting.setting_value) || 30;
+            
+            if (updatedProductData.max_rental_duration_days > maxRentalDays) {
+                throw new ApiError(
+                    httpStatusCodes.BAD_REQUEST,
+                    `ระยะเวลาเช่าสูงสุดต้องไม่เกิน ${maxRentalDays} วันตามที่ระบบกำหนด`
+                );
+            }
         }
 
         // 2. Handle image deletion
