@@ -116,6 +116,28 @@ app.get('/api', (req, res) => {
 // Main API Router
 app.use('/api', routes);
 
+// Test endpoint for scheduler (development only)
+if (serverConfig.NODE_ENV === 'development') {
+    app.post('/api/test/scheduler/run-rental-notification', async (req, res) => {
+        try {
+            console.log('🧪 Manual test: Running rental notification scheduler...');
+            const result = await schedulerService.runRentalNotificationNow();
+            res.json({
+                success: true,
+                message: 'Rental notification scheduler executed successfully',
+                data: result
+            });
+        } catch (error) {
+            console.error('❌ Error in manual scheduler test:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Failed to run rental notification scheduler',
+                error: error.message
+            });
+        }
+    });
+}
+
 // Centralized Error Handler
 app.use(errorHandler);
 

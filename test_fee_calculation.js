@@ -29,7 +29,7 @@ async function testFeeCalculation() {
       console.log(`   Input: ฿${testCase.subtotal_rental_fee}, ${testCase.pickup_method}`);
       
       try {
-        const response = await fetch('https://renteaseapi2.onrender.com/api/settings/calculate-fees', {
+        const response = await fetch('http://localhost:65019/api/settings/calculate-fees', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -62,7 +62,7 @@ async function testFeeCalculation() {
     // Test fee settings endpoint
     console.log('\n🔧 Testing Fee Settings API...');
     try {
-      const response = await fetch('https://renteaseapi2.onrender.com/api/settings/fee-settings');
+      const response = await fetch('http://localhost:65019/api/settings/fee-settings');
       if (response.ok) {
         const result = await response.json();
         console.log('✅ Fee Settings:');

@@ -611,7 +611,7 @@ const RentalService = {
         if (rental.renter_id !== renterId) {
             throw new ApiError(httpStatusCodes.FORBIDDEN, "You are not authorized to initiate a return for this rental.");
         }
-        if (!["active", "confirmed"].includes(rental.rental_status)) {
+        if (!["active", "confirmed", "late_return"].includes(rental.rental_status)) {
             throw new ApiError(httpStatusCodes.BAD_REQUEST, `Cannot initiate return. Rental status is currently '${rental.rental_status}'.`);
         }
         if (returnDetails.return_method === 'shipping' && (!returnDetails.return_details || !returnDetails.return_details.carrier)) {

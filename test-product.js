@@ -20,7 +20,7 @@ const testProductCreation = async () => {
             console.log(`${key}:`, value);
         }
         
-        const response = await fetch('https://renteaseapi2.onrender.com/api/products', {
+        const response = await fetch('http://localhost:65019/api/products', {
             method: 'POST',
             headers: {
                 'Authorization': 'Bearer YOUR_TEST_TOKEN_HERE'
