@@ -77,8 +77,17 @@ const getAdminLogs = asyncHandler(async (req, res) => {
 
 // Rental Management
 const getAllRentals = asyncHandler(async (req, res) => {
-  const { page = 1, limit = 10, ...filters } = req.query;
-  const result = await adminService.getAllRentals({ page, limit, filters });
+  const { page = 1, limit = 10, status, search, date_from, date_to, sort_by = 'created_at', sort_order = 'desc' } = req.query;
+  const result = await adminService.getAllRentals({ 
+    page: parseInt(page), 
+    limit: parseInt(limit), 
+    status, 
+    search, 
+    date_from, 
+    date_to, 
+    sort_by, 
+    sort_order 
+  });
   res.json(result);
 });
 

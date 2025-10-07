@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_BASE_URL = 'http://localhost:65019/api';
+const API_BASE_URL = 'https://renteaseapi2.onrender.com/api';
 
 // JWT Token ที่สร้างจาก generate-test-token.js
 const JWT_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MzksImVtYWlsIjoidGVzdEBleGFtcGxlLmNvbSIsImZpcnN0X25hbWUiOiJUZXN0IFVzZXIiLCJpc19hZG1pbiI6ZmFsc2UsInJvbGUiOiJ1c2VyIiwiaWF0IjoxNzU5NDE4NjM2LCJleHAiOjE3NTk1MDUwMzZ9.Xh_8X192tNiRzWU3ZxqmW19tLkZZjiPPxrzFOK54nNg';
